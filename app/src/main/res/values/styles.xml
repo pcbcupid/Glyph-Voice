@@ -1,0 +1,71 @@
+<resources>
+    <style name="BaseAppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:textColorPrimary">@color/ink</item>
+        <item name="android:textColorSecondary">@color/muted</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="android:navigationBarColor">#182720</item>
+        <item name="android:statusBarColor">@color/background</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="AppTheme" parent="BaseAppTheme" />
+    <style name="MenuButton">
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:padding">12dp</item>
+        <item name="android:tint">@color/ink</item>
+        <item name="android:background">?android:attr/selectableItemBackgroundBorderless</item>
+        <item name="android:backgroundTint">@null</item>
+    </style>
+    <style name="QuietButton" parent="android:style/Widget.Material.Button">
+        <item name="android:backgroundTint">@null</item>
+        <item name="android:minHeight">52dp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">@color/button_text</item>
+        <item name="android:background">@drawable/button_quiet</item>
+        <item name="android:paddingHorizontal">16dp</item>
+        <item name="android:paddingVertical">12dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+    <style name="PrimaryButton" parent="QuietButton">
+        <item name="android:background">@drawable/button_primary</item>
+        <item name="android:textColor">@color/on_accent</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+    <style name="TranscriptSwitchButton" parent="QuietButton">
+        <item name="android:background">@drawable/button_outline</item>
+        <item name="android:layout_marginTop">12dp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:drawableStart">@drawable/ic_swap</item>
+        <item name="android:drawableTint">@color/button_text</item>
+        <item name="android:drawablePadding">12dp</item>
+    </style>
+    <style name="DrawerActionButton" parent="QuietButton">
+        <item name="android:background">@drawable/drawer_action</item>
+        <item name="android:minHeight">60dp</item>
+        <item name="android:gravity">start|center_vertical</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:drawablePadding">14dp</item>
+        <item name="android:drawableEnd">@drawable/ic_chevron</item>
+        <item name="android:drawableTint">@color/button_text</item>
+    </style>
+    <style name="DrawerTitle">
+        <item name="android:textSize">24sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">@color/ink</item>
+    </style>
+    <style name="DrawerHint">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingVertical">16dp</item>
+        <item name="android:paddingHorizontal">8dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:lineSpacingExtra">3dp</item>
+        <item name="android:textColor">@color/muted</item>
+    </style>
+    <bool name="light_system_bars">true</bool>
+</resources>

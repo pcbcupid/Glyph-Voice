@@ -1,0 +1,126 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent">
+    <androidx.drawerlayout.widget.DrawerLayout android:id="@+id/drawers"
+        android:layout_width="match_parent" android:layout_height="match_parent" android:saveEnabled="false">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:padding="16dp" android:layoutDirection="ltr">
+                <ImageButton android:id="@+id/conversations" style="@style/MenuButton"
+                    android:src="@drawable/ic_conversations"
+                    android:contentDescription="@string/open_conversations" android:tooltipText="@string/conversations" />
+                <TextView android:id="@+id/brand" android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:text="@string/brand" android:gravity="center"
+                    android:letterSpacing="0.2" android:textSize="12sp" android:textStyle="bold" android:textColor="@color/accent" />
+                <ImageButton android:id="@+id/summaries" style="@style/MenuButton"
+                    android:src="@drawable/ic_summaries"
+                    android:contentDescription="@string/open_summaries" android:tooltipText="@string/summaries" />
+            </LinearLayout>
+            <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+                android:fillViewport="true" android:clipToPadding="false">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:paddingHorizontal="24dp" android:paddingBottom="24dp">
+                    <TextView android:id="@+id/voice_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp" android:text="@string/title" android:textSize="32sp" android:gravity="center"
+                        android:fontFamily="sans-serif-medium" android:textColor="@color/ink" />
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp" android:gravity="center" android:text="@string/subtitle"
+                        android:textSize="16sp" android:textColor="@color/muted" />
+                    <TextView android:id="@+id/connection" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal" android:layout_marginTop="24dp" android:background="@drawable/status_pill"
+                        android:paddingHorizontal="16dp" android:paddingVertical="10dp" android:text="@string/disconnected"
+                        android:textSize="14sp" android:textColor="@color/accent" android:accessibilityLiveRegion="polite" />
+                    <LinearLayout android:id="@+id/transcript_card" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="24dp" android:orientation="vertical" android:background="@drawable/transcript_card" android:padding="24dp">
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                            <TextView android:id="@+id/transcript_label" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                                android:text="@string/transcript_label" android:textSize="11sp" android:letterSpacing="0.12" android:textColor="@color/muted" android:accessibilityLiveRegion="polite" />
+                            <ProgressBar android:id="@+id/summary_spinner" android:layout_width="20dp" android:layout_height="20dp"
+                                android:visibility="gone" android:importantForAccessibility="no" />
+                        </LinearLayout>
+                        <com.pcbcupid.voice.ui.TranscriptScrollView android:id="@+id/transcript_scroll"
+                            android:layout_width="match_parent" android:layout_height="280dp"
+                            android:layout_marginTop="18dp" android:fillViewport="true" android:scrollbars="vertical" android:saveEnabled="false">
+                        <TextView android:id="@+id/transcript" android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:hint="@string/transcript_placeholder" android:textSize="25sp"
+                            android:fontFamily="sans-serif" android:lineSpacingExtra="6dp" android:textColor="@color/ink"
+                            android:textColorHint="@color/muted" android:textIsSelectable="true" android:saveEnabled="false"
+                            android:accessibilityLiveRegion="polite" />
+                        </com.pcbcupid.voice.ui.TranscriptScrollView>
+                    </LinearLayout>
+                    <Button android:id="@+id/show_current" style="@style/TranscriptSwitchButton" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:text="@string/show_current" android:visibility="gone" />
+                    <Button android:id="@+id/cancel_inline_summary" style="@style/QuietButton" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:text="@string/cancel_summary" android:visibility="gone" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:layout_marginTop="12dp">
+                        <Button android:id="@+id/copy" style="@style/QuietButton" android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:layout_marginEnd="6dp" android:text="@string/copy" />
+                        <Button android:id="@+id/summarize" style="@style/QuietButton" android:layout_width="0dp" android:layout_weight="1"
+                            android:layout_height="wrap_content" android:layout_marginStart="6dp" android:text="@string/summarize" />
+                    </LinearLayout>
+                    <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent" android:layout_height="3dp" android:layout_marginTop="16dp"
+                        android:indeterminate="true" android:visibility="gone" android:importantForAccessibility="no" />
+                    <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp" android:text="@string/waiting" android:textSize="14sp"
+                        android:lineSpacingExtra="3dp" android:textColor="@color/muted" android:accessibilityLiveRegion="polite" />
+                    <Button android:id="@+id/connect" style="@style/PrimaryButton" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="@string/connect_glyph" />
+                    <TextView android:id="@+id/background_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:minHeight="48dp" android:gravity="center" android:padding="8dp" android:text="@string/background_hint"
+                        android:textSize="12sp" android:textColor="@color/accent" android:clickable="true" android:focusable="true"
+                        android:background="?android:attr/selectableItemBackground" />
+                    <TextView android:id="@+id/model_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="@string/checking_model" android:textSize="12sp" android:textColor="@color/muted" android:gravity="center" />
+                    <Button android:id="@+id/retry_model" style="@style/QuietButton" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:text="@string/retry_model" android:visibility="gone" />
+                    <TextView android:id="@+id/diagnostics" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:fontFamily="monospace" android:textSize="12sp" android:textColor="@color/muted" android:visibility="gone" />
+                    <TextView android:id="@+id/privacy" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp" android:text="@string/privacy" android:textSize="12sp" android:lineSpacingExtra="3dp"
+                        android:textColor="@color/muted" android:gravity="center" />
+                </LinearLayout>
+            </ScrollView>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/left_drawer" android:layout_width="320dp" android:layout_height="match_parent"
+            android:layout_gravity="left" android:orientation="vertical" android:background="@color/surface" android:elevation="12dp" android:padding="16dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                <TextView android:id="@+id/conversations_title" style="@style/DrawerTitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/conversations" />
+                <ImageButton android:id="@+id/close_left" style="@style/MenuButton" android:src="@drawable/ic_close" android:contentDescription="@string/close_conversations" />
+            </LinearLayout>
+            <TextView style="@style/DrawerHint" android:text="@string/conversation_hint" />
+            <TextView android:id="@+id/conversations_empty" style="@style/DrawerHint" android:text="@string/conversations_empty" />
+            <ListView android:id="@+id/conversation_list" android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_weight="1" android:divider="@color/outline" android:dividerHeight="1dp" android:saveEnabled="false" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/right_drawer" android:layout_width="320dp" android:layout_height="match_parent"
+            android:layout_gravity="right" android:orientation="vertical" android:background="@color/surface" android:elevation="12dp" android:padding="16dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                <TextView android:id="@+id/summaries_title" style="@style/DrawerTitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="@string/summaries" />
+                <ImageButton android:id="@+id/close_right" style="@style/MenuButton" android:src="@drawable/ic_close" android:contentDescription="@string/close_summaries" />
+            </LinearLayout>
+            <TextView style="@style/DrawerHint" android:text="@string/summary_hint" />
+            <TextView android:id="@+id/summaries_empty" style="@style/DrawerHint" android:text="@string/summaries_empty" />
+            <ListView android:id="@+id/summary_list" android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_weight="1" android:divider="@color/outline" android:dividerHeight="1dp" android:saveEnabled="false" />
+            <TextView android:id="@+id/summary_status" style="@style/DrawerHint" android:accessibilityLiveRegion="polite" />
+            <Button android:id="@+id/cancel_summary" style="@style/QuietButton" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="@string/cancel_summary" android:visibility="gone" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="16dp" android:layout_marginBottom="10dp" android:paddingHorizontal="8dp"
+                android:text="@string/drawer_settings" android:textSize="11sp" android:letterSpacing="0.12"
+                android:textColor="@color/muted" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:background="@drawable/button_outline" android:padding="4dp">
+                <Button android:id="@+id/api_settings" style="@style/DrawerActionButton" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="@string/connect_api" android:drawableStart="@drawable/ic_api_key" />
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginHorizontal="16dp"
+                    android:background="@color/outline" android:importantForAccessibility="no" />
+                <Button android:id="@+id/speech_settings" style="@style/DrawerActionButton" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="@string/speech_settings" />
+                <Button android:id="@+id/licenses" style="@style/DrawerActionButton" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:text="@string/about" android:drawableStart="@drawable/ic_info" />
+            </LinearLayout>
+        </LinearLayout>
+    </androidx.drawerlayout.widget.DrawerLayout>
+</FrameLayout>

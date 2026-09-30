@@ -1,0 +1,10 @@
+Legacy host-test model (not bundled in current APK): vosk-model-small-en-us-0.15
+Copyright 2020 Alpha Cephei Inc
+
+The original model archive is redistributed without modification.
+Source: https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+License: Apache License, Version 2.0 (see Apache-2.0.txt in this directory).
+License listing: https://alphacephei.com/vosk/models
+
+The upstream README and copyright notice are also preserved inside the archive
+and the extracted model directory.

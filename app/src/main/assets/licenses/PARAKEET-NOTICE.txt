@@ -1,0 +1,22 @@
+NVIDIA Parakeet Unified English 0.6B streaming speech recognition model
+Creator: NVIDIA
+Original model: https://huggingface.co/nvidia/parakeet-unified-en-0.6b
+Licensed by NVIDIA Corporation under the NVIDIA Open Model License
+License: NVIDIA Open Model License Agreement, October 24, 2025
+License URL: https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/
+Full license copy: NVIDIA-OPEN-MODEL-LICENSE.pdf in this directory.
+
+ONNX conversion and INT8 quantization distributed by the sherpa-onnx project:
+https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
+Artifact: sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms.tar.bz2
+https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8/scripts/nemo/parakeet-unified-en-0.6b
+
+Changes: The upstream ONNX INT8 encoder, decoder, joiner and tokens are repackaged
+unchanged into a ZIP for offline Android installation. Upstream test recordings
+are omitted. This is a quantized derivative, not the original FP32 checkpoint.
+NVIDIA and the sherpa-onnx contributors do not endorse this application.
+
+Local inference runtime: sherpa-onnx 1.13.8 (Apache-2.0), using ONNX Runtime.
+https://github.com/k2-fsa/sherpa-onnx
+https://github.com/microsoft/onnxruntime
+No NVIDIA service, cloud inference, OpenAI API, or remote processing is used.

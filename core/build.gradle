@@ -1,0 +1,21 @@
+plugins { id 'java-library' }
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+dependencies {
+    api 'com.squareup.okhttp3:okhttp:4.12.0'
+    compileOnly 'org.json:json:20240303'
+    testImplementation 'org.json:json:20240303'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    testImplementation 'com.alphacephei:vosk:0.3.45'
+}
+test {
+    if (project.hasProperty('voiceFixtures')) systemProperty 'voiceFixtures', project.property('voiceFixtures')
+    testLogging { events 'passed', 'skipped', 'failed' }
+}
+tasks.register('exportHostTestClasspath') {
+    dependsOn testClasses
+    doLast { layout.buildDirectory.file('host-test-classpath.txt').get().asFile.text = sourceSets.test.runtimeClasspath.asPath }
+}

@@ -1,0 +1,29 @@
+services:
+  glyph-voice:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    ports:
+      - "${GLYPH_BIND_ADDRESS:-127.0.0.1}:8765:8765"
+    environment:
+      GLYPH_LOCAL_TOKEN: "${GLYPH_LOCAL_TOKEN:?Set a random private access token}"
+    volumes:
+      - "${GLYPH_MODELS_DIR:?Set the absolute host model collection path}:/models:ro"
+    command:
+      - --models-dir
+      - /models
+      - --host
+      - 0.0.0.0
+      - --origin
+      - "${GLYPH_ORIGIN:-http://localhost:8765}"
+      - --glyph-host
+      - "${GLYPH_BOARD_IP:?Set the board private IPv4 address}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    init: true
+    restart: unless-stopped

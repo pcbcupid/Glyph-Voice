@@ -1,7 +1,9 @@
-# GLYPH C6 voice firmware — transport-r6 / 0.11.0
+# GLYPH C6 voice firmware — transport-r7 / 0.12.0
 
 Matching firmware for the GLYPH VOICE Android app, with automatic hotspot discovery
-and first-use Wi-Fi configuration. No private hotspot credentials are compiled in.
+and PIN-authenticated Bluetooth Wi-Fi configuration. No private hotspot credentials
+are compiled in. See [Bluetooth setup](../docs/BLUETOOTH_SETUP.md) for the new Android
+radar, supported-browser picker, pairing PIN and iPhone fallback.
 
 - [Kit wiring and hardware operation](../kit/HARDWARE.md)
 - [Download, flashing and first-use setup](../kit/FIRMWARE.md)
@@ -44,9 +46,10 @@ and partition files. Release names and flashing commands are in the Kit guide.
 - On Wi-Fi reconnect, the WebSocket server and UDP announcer restart. Every second,
   announcements go directly to the hotspot gateway on UDP 40123. The stable board
   ID is its station MAC without separators. No mDNS/client-list lookup is needed.
-- `WifiSetup.h` owns first-use setup and saves hotspot settings in NVS. Its temporary
-  WPA2 setup AP/web page closes on restart into normal operation. Hold BOOT for
-  five seconds while disconnected, after normal boot, to reconfigure it.
+- `WifiSetup.h` owns BLE and fallback SoftAP setup, persisting credentials in NVS
+  only after a successful join. BLE advertises for five minutes after boot and closes
+  on audio connection. Hold BOOT for five seconds with no audio client to reconfigure.
+  The temporary WPA2 setup AP closes when a join attempt begins.
 
 Wi-Fi sleep is disabled. One app client is supported. There is no remote-start,
 OTA, SD audio storage, or speech model on the C6. See `config.h` for pin and buffer
@@ -59,6 +62,8 @@ c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/PcmDecimatorTest.cpp -o /tmp
 /tmp/glyph-decimator-test
 c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/StopCommandTest.cpp -o /tmp/glyph-stop-test
 /tmp/glyph-stop-test
+c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/ProvisioningFrameTest.cpp -o /tmp/glyph-provisioning-test
+/tmp/glyph-provisioning-test
 ```
 
 Compilation and host checks do not establish microphone electrical compatibility,

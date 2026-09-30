@@ -49,6 +49,7 @@ public final class MainActivity extends ComponentActivity {
     private Entry pendingSummaryConsent;
     private ActivityResultLauncher<String> notificationPermission;
     private ActivityResultLauncher<Intent> batteryPermission;
+    private ActivityResultLauncher<Intent> glyphSetup;
     private AlertDialog details;
     private AlertDialog prompt;
     private final ServiceConnection serviceConnection = new ServiceConnection() {
@@ -92,6 +93,17 @@ public final class MainActivity extends ComponentActivity {
         findViewById(R.id.copy).setEnabled(false);
         findViewById(R.id.summarize).setEnabled(false);
         setupDrawers();
+        glyphSetup = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() != RESULT_OK || result.getData() == null) return;
+            String address = result.getData().getStringExtra(GlyphSetupActivity.ADDRESS);
+            String id = result.getData().getStringExtra(GlyphSetupActivity.BOARD_ID);
+            try {
+                LocalEndpoint.url(address == null ? "" : address);
+                if (id == null || !id.matches("[A-F0-9]{12}")) throw new IllegalArgumentException();
+                getSharedPreferences("glyph", 0).edit().putString("board_id", id).apply();
+                beginConnection(address);
+            } catch (IllegalArgumentException e) { showDetails("Glyph setup", "Invalid board address. Find Glyph via Wi-Fi to retry."); }
+        });
         notificationPermission = registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
             if (granted) {
                 if (pendingSummaryConsent != null) startSummaryService(); else requestBatteryThenConnect();
@@ -260,9 +272,16 @@ public final class MainActivity extends ComponentActivity {
     }
     private void showConnect() {
         showPrompt(new AlertDialog.Builder(this).setTitle("Connect your Glyph")
-                .setMessage("Enable your phone hotspot in 2.4 GHz mode and power on your configured Glyph. The app finds it automatically. For a new board, complete the firmware Wi-Fi setup first (Kit guide). BOOT starts recording; BOOT or Stop & summarize ends it.")
-                .setPositiveButton("Find Glyph", (dialog, which) -> beginConnection("auto"))
-                .setNeutralButton("Choose another board", (dialog, which) -> { controller.forgetBoard(); beginConnection("auto"); })
+                .setItems(new String[]{"Bluetooth setup", "Find via Wi-Fi", "Choose another board via Wi-Fi"}, (dialog, which) -> {
+                    if (which == 0) glyphSetup.launch(new Intent(this, GlyphSetupActivity.class));
+                    else {
+                        if (which == 2) {
+                            getSharedPreferences("glyph", 0).edit().remove("board_id").apply();
+                            if (controller != null) controller.forgetBoard();
+                        }
+                        beginConnection("auto");
+                    }
+                })
                 .setNegativeButton("Cancel", null).create());
     }
     private void showBoardChooser() {

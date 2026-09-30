@@ -49,6 +49,7 @@ uint64_t sentBytes = 0; // Session totals must not wrap during long recordings.
 bool initialized = false;
 bool wifiConnected = false;
 bool microphoneFailureReported = false;
+bool closeBluetooth = false;
 uint32_t lastWifiAttempt = 0;
 uint32_t maxSendMs = 0;
 
@@ -212,12 +213,13 @@ void dropPhone(const char* reason) {
 
 void socketEvent(uint8_t client, WStype_t type, uint8_t* payload, size_t length) {
   if (type == WStype_CONNECTED) {
-    if (phone >= 0 || microphoneFailed.load() ||
+    if (phone >= 0 || wifiSetup.busy() || microphoneFailed.load() ||
         length != strlen(Config::AUDIO_PATH) || memcmp(payload, Config::AUDIO_PATH, length) != 0) {
       socketServer.disconnect(client);
       return;
     }
     phone = client;
+    closeBluetooth = true;
     if (++epochCounter == 0) ++epochCounter;
     connectedEpoch.store(epochCounter);
     Serial.println("[network] Phone connected; click BOOT to start, click again to stop");
@@ -275,7 +277,7 @@ void setup() {
   // CDC's default write timeout can stall the sender longer than the audio queue.
   // Prefer dropping diagnostic output when USB is congested to blocking speech.
   Serial.setTxTimeoutMs(0);
-  Serial.println("[firmware] GLYPH VOICE 0.11.0 transport-r6: automatic discovery and first-use Wi-Fi setup");
+  Serial.println("[firmware] GLYPH VOICE 0.12.0 transport-r7: authenticated BLE Wi-Fi setup and discovery");
   pinMode(Config::RECORD_BUTTON, INPUT_PULLUP);
   audioQueue = xQueueCreate(Config::QUEUE_PACKETS, sizeof(Packet));
   if (!audioQueue) {
@@ -304,7 +306,7 @@ void loop() {
     delay(100);
     return;
   }
-  wifiSetup.poll(!wifiConnected);
+  wifiSetup.poll(phone < 0);
   if (wifiSetup.active) { delay(2); return; }
   if (microphoneFailed.load() && !microphoneFailureReported) {
     microphoneFailureReported = true;
@@ -319,7 +321,7 @@ void loop() {
       socketServer.close();
       discovery.stop();
     }
-    if (millis() - lastWifiAttempt >= 15000) {
+    if (!wifiSetup.busy() && millis() - lastWifiAttempt >= 15000) {
       lastWifiAttempt = millis();
       WiFi.reconnect();
       Serial.println("[network] Retrying hotspot connection");
@@ -351,6 +353,7 @@ void loop() {
     }
   }
   socketServer.loop();
+  if (closeBluetooth) { closeBluetooth = false; wifiSetup.audioConnected(); }
   Packet packet;
   // A bounded batch prevents a busy audio queue starving socket housekeeping.
   for (unsigned i = 0; i < Config::SEND_BATCH_PACKETS; ++i) {

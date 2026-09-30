@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 : "${GLYPH_STORE_PASSWORD:?Set the keystore password in the environment}"
 : "${GLYPH_KEY_PASSWORD:?Set the key password in the environment}"
 : "${GLYPH_KEY_ALIAS:?Set the signing key alias}"
-version=0.11.0
+version=0.12.0
 output="${GLYPH_RELEASE_DIR:-.tools/release}"
 build_tools="$ANDROID_HOME/build-tools/35.0.0"
 python3 tools/fetch_assets.py

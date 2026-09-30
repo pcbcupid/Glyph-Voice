@@ -2,6 +2,10 @@
 
 Release preparation date: 2026-09-30.
 
+This page records the published 0.11.0 baseline. The subsequent **0.12.0 / transport-r7**
+working-tree Bluetooth changes and current software/hardware status are documented in
+[Bluetooth setup verification](BLUETOOTH_SETUP.md#verification-and-hardware-checklist).
+
 ## Software checks
 
 - Android debug app and instrumentation APK compile successfully.

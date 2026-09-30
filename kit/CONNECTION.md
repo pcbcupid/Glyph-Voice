@@ -1,5 +1,11 @@
 # Connection and troubleshooting
 
+Source-built **0.12.0 / transport-r7** adds **Connect Glyph → Bluetooth setup**,
+which discovers the board and sends Wi-Fi details with a private pairing PIN.
+See [Bluetooth setup](../docs/BLUETOOTH_SETUP.md). The hotspot UDP flow below remains
+available through **Find via Wi-Fi**; Bluetooth also works for address discovery
+on a shared router, provided the router permits client-to-client traffic.
+
 ## Automatic hotspot discovery
 
 The Glyph joins the hotspot saved through its first-use setup page. Once connected,

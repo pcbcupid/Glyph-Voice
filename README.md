@@ -13,7 +13,22 @@ I2S microphone → GLYPH C6 → phone hotspot → Android app → transcript
 [**Kit guide**](kit/README.md) · [**Download APK and firmware**](https://github.com/pcbcupid/Glyph-Voice/releases)
 · [Circuit diagram](hardware/glyph-voice-wiring.svg) · [Firmware](firmware/README.md)
 
+**Web migration in progress:** the separate [React web preview](web/README.md)
+targets foreground use on phones and desktop. See the [migration plan](docs/WEB_MIGRATION.md).
+It now supports [self-hosted local Parakeet with a model-folder picker](server/README.md)
+and an optional local board bridge. It does not yet replace the Android app: phone-only
+browser Parakeet, AI summaries and real-device deployment validation remain. The Android instructions
+and release below remain valid.
+
+**New in this working tree (0.12.0 / transport-r7):** [Bluetooth Wi-Fi setup](docs/BLUETOOTH_SETUP.md)
+with an Android radar and optional React browser picker. Requires the new firmware;
+the published 0.11.0 binaries do not include it. Android local Parakeet is unchanged.
+Safari uses the setup-AP fallback; hosted HTTPS audio can use the new self-hosted bridge.
+
 ## Get started
+
+The following steps describe the published 0.11.0 release. For the new source-built
+Bluetooth flow, use the [0.12.0 setup guide](docs/BLUETOOTH_SETUP.md#android-first-setup).
 
 1. Wire the kit using the [connection diagram](kit/HARDWARE.md).
 2. Flash the release's **merged firmware `.bin`** using the [firmware guide](kit/FIRMWARE.md).

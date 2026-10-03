@@ -11,7 +11,8 @@ class LauncherTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # macOS /var is a symlink; compare canonical paths like the launcher does.
+        self.root = Path(self.temp.name).resolve()
         self.patch = patch.object(launcher, "ROOT", self.root)
         self.patch.start()
         self.addCleanup(self.patch.stop)

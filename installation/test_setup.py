@@ -17,7 +17,8 @@ class InstallerTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='glyph installer ')
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        # macOS /var is a symlink; compare canonical paths like the launcher does.
+        self.root = Path(temporary.name).resolve()
 
     def tar(self, files):
         archive = self.root / 'model.tar.bz2'

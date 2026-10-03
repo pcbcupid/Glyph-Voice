@@ -112,7 +112,7 @@ class WarmupTests(unittest.TestCase):
 class BrowserLauncherTests(unittest.TestCase):
     def test_browser_opens_only_from_bound_server_callback_without_token_in_url(self):
         with tempfile.TemporaryDirectory() as folder, \
-             patch("sys.argv", ["server", "--models-dir", folder, "--open-browser"]), \
+             patch("sys.argv", ["server", "--models-dir", folder, "--dist", folder, "--open-browser"]), \
              patch.dict(os.environ, {"GLYPH_LOCAL_TOKEN": TOKEN}), \
              patch("builtins.print"), patch("server.app.webbrowser.open", return_value=True) as browser, \
              patch("server.app.threading.Thread") as thread, \
@@ -129,7 +129,7 @@ class BrowserLauncherTests(unittest.TestCase):
 
     def test_bind_failure_does_not_open_browser(self):
         with tempfile.TemporaryDirectory() as folder, \
-             patch("sys.argv", ["server", "--models-dir", folder, "--open-browser"]), \
+             patch("sys.argv", ["server", "--models-dir", folder, "--dist", folder, "--open-browser"]), \
              patch.dict(os.environ, {"GLYPH_LOCAL_TOKEN": TOKEN}), \
              patch("builtins.print"), patch("sys.stderr"), \
              patch("server.app.threading.Thread") as thread, \

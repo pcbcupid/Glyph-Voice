@@ -49,6 +49,10 @@
                     </LinearLayout>
                     <Button android:id="@+id/show_current" style="@style/TranscriptSwitchButton" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:text="@string/show_current" android:visibility="gone" />
+                    <TextView android:id="@+id/inline_summary_status" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="12dp"
+                        android:textSize="14sp" android:textColor="@color/muted" android:visibility="gone"
+                        android:lineSpacingExtra="3dp" />
                     <Button android:id="@+id/cancel_inline_summary" style="@style/QuietButton" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:text="@string/cancel_summary" android:visibility="gone" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"

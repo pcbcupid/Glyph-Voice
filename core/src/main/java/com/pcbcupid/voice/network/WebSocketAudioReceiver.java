@@ -125,7 +125,10 @@ public final class WebSocketAudioReceiver implements AudioReceiver {
     private void armInactivity() {
         if (inactivity != null) inactivity.cancel(false);
         inactivity = scheduler.schedule(() -> {
-            synchronized (this) { if (session != null) fail("No audio received for 5 seconds. Recording interrupted; words kept."); }
+            synchronized (this) {
+                if (session != null) listener.onWaitingForAudio(
+                        "Waiting for Glyph audio… Connection is still open; click BOOT or Stop & summarize to stop.");
+            }
         }, 5, TimeUnit.SECONDS);
     }
     private void clearSession() {

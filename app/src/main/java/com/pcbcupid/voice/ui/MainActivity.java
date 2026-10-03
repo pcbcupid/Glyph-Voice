@@ -40,6 +40,8 @@ public final class MainActivity extends ComponentActivity {
     private DrawerLayout drawers;
     private TranscriptScrollView transcriptScroll;
     private ObjectAnimator summaryPulse;
+    private final Handler summaryUi = new Handler(Looper.getMainLooper());
+    private final Runnable summaryTick = this::renderSummaryStatus;
     private long renderedViewRevision = Long.MIN_VALUE;
     private boolean resetTextScroll;
     private boolean previousLiveRender;
@@ -49,7 +51,6 @@ public final class MainActivity extends ComponentActivity {
     private Entry pendingSummaryConsent;
     private ActivityResultLauncher<String> notificationPermission;
     private ActivityResultLauncher<Intent> batteryPermission;
-    private ActivityResultLauncher<Intent> glyphSetup;
     private AlertDialog details;
     private AlertDialog prompt;
     private final ServiceConnection serviceConnection = new ServiceConnection() {
@@ -93,17 +94,6 @@ public final class MainActivity extends ComponentActivity {
         findViewById(R.id.copy).setEnabled(false);
         findViewById(R.id.summarize).setEnabled(false);
         setupDrawers();
-        glyphSetup = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-            if (result.getResultCode() != RESULT_OK || result.getData() == null) return;
-            String address = result.getData().getStringExtra(GlyphSetupActivity.ADDRESS);
-            String id = result.getData().getStringExtra(GlyphSetupActivity.BOARD_ID);
-            try {
-                LocalEndpoint.url(address == null ? "" : address);
-                if (id == null || !id.matches("[A-F0-9]{12}")) throw new IllegalArgumentException();
-                getSharedPreferences("glyph", 0).edit().putString("board_id", id).apply();
-                beginConnection(address);
-            } catch (IllegalArgumentException e) { showDetails("Glyph setup", "Invalid board address. Find Glyph via Wi-Fi to retry."); }
-        });
         notificationPermission = registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
             if (granted) {
                 if (pendingSummaryConsent != null) startSummaryService(); else requestBatteryThenConnect();
@@ -141,8 +131,7 @@ public final class MainActivity extends ComponentActivity {
         });
         connect.setOnClickListener(v -> {
             if (controller == null) return;
-            if (controller.needsBoardChoice()) showBoardChooser();
-            else if (controller.backgroundActive && service != null) service.stopSession(); else showConnect();
+            if (controller.backgroundActive && service != null) service.stopSession(); else showConnect();
         });
         findViewById(R.id.brand).setOnLongClickListener(v -> {
             if (!BuildConfig.DEBUG) return false;
@@ -271,26 +260,34 @@ public final class MainActivity extends ComponentActivity {
                 .setNegativeButton("Cancel", null).create());
     }
     private void showConnect() {
-        showPrompt(new AlertDialog.Builder(this).setTitle("Connect your Glyph")
-                .setItems(new String[]{"Bluetooth setup", "Find via Wi-Fi", "Choose another board via Wi-Fi"}, (dialog, which) -> {
-                    if (which == 0) glyphSetup.launch(new Intent(this, GlyphSetupActivity.class));
-                    else {
-                        if (which == 2) {
-                            getSharedPreferences("glyph", 0).edit().remove("board_id").apply();
-                            if (controller != null) controller.forgetBoard();
-                        }
-                        beginConnection("auto");
-                    }
-                })
-                .setNegativeButton("Cancel", null).create());
-    }
-    private void showBoardChooser() {
-        java.util.List<com.pcbcupid.voice.network.GlyphAnnouncement> boards = new java.util.ArrayList<>(controller.discoveredBoards);
-        String[] names = new String[boards.size()];
-        for (int i = 0; i < boards.size(); i++) names[i] = boards.get(i).toString();
-        showPrompt(new AlertDialog.Builder(this).setTitle("Choose your Glyph")
-                .setItems(names, (d, which) -> controller.selectBoard(boards.get(which)))
-                .setNegativeButton("Disconnect", (d, w) -> { if (service != null) service.stopSession(); }).create());
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(24), dp(8), dp(24), 0);
+        TextView help = new TextView(this);
+        help.setText("Use the same Wi-Fi as your Glyph, or the phone hotspot it joined. Copy your board's recording IP from USB Serial Monitor (115200 baud). No Bluetooth or scanning.");
+        form.addView(help);
+        EditText address = new EditText(this);
+        address.setSingleLine(true);
+        address.setHint("192.168.0.126:8080");
+        address.setContentDescription("Glyph address");
+        address.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        address.setText(getSharedPreferences("glyph", 0).getString("address", ""));
+        form.addView(address);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Connect your Glyph")
+                .setView(form).setPositiveButton("Connect", null).setNegativeButton("Cancel", null)
+                .setNeutralButton("Wi-Fi setup help", (d, w) -> showDetails("Set up Glyph Wi-Fi",
+                        "Reset with BOOT released, then tap BOOT during the 3-second countdown. In a write-capable USB serial monitor (115200), choose a board hotspot label and password when prompted. Join the printed GLYPH-name-suffix Wi-Fi with that password, open http://192.168.4.1 and enter your router's 2.4 GHz Wi-Fi settings. After restart, return to that network and copy the recording IP from serial. LED blinking = no Wi-Fi IP; steady = Wi-Fi connected. Older firmware may use GLYPH-Setup / glyphvoice. Only one app can connect to a board at a time."))
+                .create();
+        showPrompt(dialog);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String value = address.getText().toString().trim();
+            try {
+                LocalEndpoint.url(value);
+                getSharedPreferences("glyph", 0).edit().putString("address", value).apply();
+                dialog.dismiss();
+                beginConnection(value);
+            } catch (IllegalArgumentException e) { address.setError(e.getMessage()); }
+        });
     }
     private void beginConnection(String address) {
         pendingAddress = address;
@@ -378,6 +375,7 @@ public final class MainActivity extends ComponentActivity {
     }
     @Override protected void onStop() {
         started = false;
+        summaryUi.removeCallbacks(summaryTick);
         stopSummaryAnimation();
         transcript.animate().cancel(); transcript.setAlpha(1f); transcript.setTranslationY(0f);
         // Key-entry dialogs must not keep a stale service/controller or retain a
@@ -439,14 +437,14 @@ public final class MainActivity extends ComponentActivity {
         if (!controller.serviceMessage.isEmpty()) status.append("\n" + controller.serviceMessage);
         if (!controller.stopMessage.isEmpty()) status.setText(controller.stopMessage);
         conversations.update(controller.conversations); summaries.update(controller.summaries);
-        ((TextView) findViewById(R.id.summary_status)).setText(controller.summaryMessage);
+        renderSummaryStatus();
         findViewById(R.id.cancel_summary).setVisibility(controller.summaryBusy ? View.VISIBLE : View.GONE);
         findViewById(R.id.api_settings).setEnabled(!controller.summaryBusy);
         modelStatus.setText(controller.modelMessage);
         retryModel.setVisibility(controller.modelSetupAttempted && !controller.modelReady && !controller.modelBusy ? View.VISIBLE : View.GONE);
         progress.setVisibility(controller.modelBusy || controller.state.phase == VoiceState.Phase.PROCESSING ? View.VISIBLE : View.GONE);
         connect.setEnabled(!controller.modelBusy || controller.backgroundActive);
-        connect.setText(controller.needsBoardChoice() ? R.string.choose_glyph : controller.backgroundActive ? R.string.disconnect : R.string.connect_glyph);
+        connect.setText(controller.backgroundActive ? R.string.disconnect : R.string.connect_glyph);
         findViewById(R.id.speech_settings).setEnabled(!controller.backgroundActive && !controller.modelBusy && !controller.recordingBusy());
         backgroundStatus.setText(controller.backgroundActive
                 ? (standbyRestricted() ? "Low Power Standby may block locked-screen use · tap to fix"
@@ -463,6 +461,21 @@ public final class MainActivity extends ComponentActivity {
                 else target.apiSetupNeeded = true;
             });
         }
+    }
+    private void renderSummaryStatus() {
+        summaryUi.removeCallbacks(summaryTick);
+        if (controller == null || !started) return;
+        String message = controller.summaryMessage;
+        if (controller.summaryBusy) {
+            long seconds = Math.max(0, (SystemClock.elapsedRealtime() - controller.summaryStartedAt) / 1000);
+            message += " · " + seconds + "s elapsed";
+        }
+        TextView inline = findViewById(R.id.inline_summary_status);
+        inline.setAccessibilityLiveRegion(controller.summaryBusy ? View.ACCESSIBILITY_LIVE_REGION_NONE : View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        inline.setText(message);
+        inline.setVisibility(message.isEmpty() ? View.GONE : View.VISIBLE);
+        ((TextView) findViewById(R.id.summary_status)).setText(message);
+        if (controller.summaryBusy) summaryUi.postDelayed(summaryTick, 1000);
     }
     private void updateSummaryAnimation(boolean busy) {
         if (!busy || !started || !ValueAnimator.areAnimatorsEnabled()) { stopSummaryAnimation(); return; }

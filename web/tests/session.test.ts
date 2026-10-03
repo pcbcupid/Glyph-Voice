@@ -56,6 +56,25 @@ describe('stream lifecycle', () => {
     session.connectionLost('Disconnected');
     await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
   });
+  it('preserves an audio pause as live and resumes on the very next packet', async () => {
+    const { session, fake, complete } = setup();
+    session.accept(start);
+    audio(session);
+    await vi.waitFor(() => expect(session.state.conversation?.text).toBe('Partial words'));
+    session.waitingForAudio('Waiting for Glyph audio');
+    expect(session.state.phase).toBe('receiving');
+    expect(session.busy).toBe(true);
+    expect(session.state.conversation?.text).toBe('Partial words');
+    expect(fake.cancel).not.toHaveBeenCalled();
+    expect(fake.finish).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+    audio(session);
+    expect(session.state.message).toContain('Listening');
+    session.accept(end);
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+    session.waitingForAudio('Stale warning');
+    expect(session.state.message).not.toBe('Stale warning');
+  });
   it('does not publish late inference after explicit cancellation', async () => {
     let resolve!: (text: string) => void;
     const { session, complete } = setup({

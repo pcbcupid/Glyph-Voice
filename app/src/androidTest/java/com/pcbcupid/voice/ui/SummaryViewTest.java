@@ -61,4 +61,21 @@ public class SummaryViewTest {
             assertFalse(controller.viewingOriginal());
         });
     }
+
+    @Test public void unsavedResponseCanToggleToOriginalAndBackWithoutLosingCopyableText() throws Exception {
+        VoiceController controller = controller();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            Entry saved = summary();
+            Entry unsaved = new Entry(saved.id, saved.text, "Not saved", saved.created,
+                    saved.sourceId, saved.source, saved.provider, saved.model);
+            assertTrue(controller.selectSummary(unsaved));
+            controller.showOriginalOrCurrent();
+            assertEquals(saved.source, controller.displayedText());
+            controller.showOriginalOrCurrent();
+            assertTrue(controller.viewingSummary());
+            assertEquals(saved.text, controller.displayedText());
+            assertEquals("Not saved", controller.selectedStatus());
+            assertFalse(controller.summaryBusy);
+        });
+    }
 }

@@ -2,14 +2,21 @@
 
 ## Install and connect
 
-Download `glyph-voice-0.11.0.apk` from [Releases](https://github.com/pcbcupid/Glyph-Voice/releases).
+For the current Wi-Fi-only/manual-IP flow, build the latest APK from source.
+Older files on [Releases](https://github.com/pcbcupid/Glyph-Voice/releases) may still
+use discovery/Bluetooth; do not mix those instructions with this version.
 Allow installation from the browser/file manager when Android asks, then open
 **GLYPH VOICE**. The package ID remains `com.pcbcupid.voice`.
 
-Enable the configured 2.4 GHz phone hotspot, power the Glyph, and tap **Connect
-Glyph → Find Glyph**. Grant notifications and review background/battery prompts.
-One discovered board connects automatically after a short search; for multiple
-boards tap **Choose Glyph**. The app remembers the selected board's identity.
+Enable the configured 2.4 GHz phone hotspot or join the same router as the Glyph.
+First-time board setup now asks for its own hotspot label/password in browser
+serial before router setup: [no-Arduino setup](FIRMWARE.md). GPIO14 blinking means
+no Wi-Fi IP; steady means Wi-Fi joined, not necessarily app/model ready.
+Open USB Serial Monitor at 115200 baud and copy the board's `[ready]` recording IP.
+Tap **Connect Glyph**, enter that IP (optionally `:8080`), then **Connect**.
+Grant notifications and review background/battery prompts. The app remembers the
+entered IP; update it if DHCP changes it. No Bluetooth/location permission or
+nearby-board scanning is requested. Only one app can use a board at a time.
 
 Local mode prepares the bundled Parakeet model on first connection and shows
 progress. Allow at least 2 GB free storage. The bundled model is English-only.

@@ -1,0 +1,13 @@
+Licensed by NVIDIA Corporation under the NVIDIA Open Model License.
+
+Model creator: NVIDIA
+Original model: https://huggingface.co/nvidia/parakeet-unified-en-0.6b
+ONNX INT8 streaming conversion: sherpa-onnx / k2-fsa
+Export: sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-1120ms
+Source: https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
+Archive SHA-256: 4788229a6dd03be33f8243ccee48e33a8d15df7b448cb99150b0ccddd1b02d74
+
+Glyph Voice extracts the four inference files unchanged. Test audio is excluded.
+No endorsement by NVIDIA or sherpa-onnx is implied. Model weights are governed
+by the accompanying NVIDIA-OPEN-MODEL-LICENSE.pdf, not Glyph Voice's MIT license.
+Preserve this notice and the license when redistributing the model collection.

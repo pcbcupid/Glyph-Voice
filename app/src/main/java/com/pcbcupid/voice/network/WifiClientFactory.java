@@ -25,6 +25,7 @@ public final class WifiClientFactory implements WebSocketAudioReceiver.ClientFac
                 .followRedirects(false).followSslRedirects(false)
                 .connectTimeout(5, TimeUnit.SECONDS)
                 .readTimeout(0, TimeUnit.SECONDS)
+                .callTimeout(0, TimeUnit.SECONDS) // No total audio-session deadline.
                 .pingInterval(10, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(false);
         for (Network network : connectivity.getAllNetworks()) {

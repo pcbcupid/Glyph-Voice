@@ -166,7 +166,10 @@ export function LocalSettings({
         )}
       </fieldset>
       {busy && (
-        <p role="status">Working on your server… Model loading can take up to two minutes.</p>
+        <p role="status">
+          Preparing your server… Loading and warming up the model can take up to two minutes. Wait
+          until connected before pressing BOOT.
+        </p>
       )}
       {disabled && <p>Disconnect Glyph before changing models.</p>}
       <p role="alert">{error}</p>

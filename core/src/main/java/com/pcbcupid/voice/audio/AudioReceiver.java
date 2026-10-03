@@ -10,6 +10,8 @@ public interface AudioReceiver extends AutoCloseable {
         void onAudio(byte[] pcm);
         void onEnd(String id);
         void onError(String message);
+        /** Missing packets with a still-open socket are a warning, not an end frame. */
+        default void onWaitingForAudio(String message) {}
     }
     void connect(String address, Listener listener);
     void disconnect();

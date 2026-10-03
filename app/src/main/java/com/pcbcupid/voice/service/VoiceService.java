@@ -89,7 +89,7 @@ public final class VoiceService extends Service {
         if (active) return START_NOT_STICKY; // Double taps must not cancel an active recording.
         try {
             String address = intent.getStringExtra(ADDRESS);
-            if (!"auto".equals(address)) LocalEndpoint.url(address == null ? "" : address);
+            LocalEndpoint.url(address == null ? "" : address);
             // Promote promptly, before connecting or waiting for the large local model.
             active = true;
             promote(notification("Preparing speech recognition…"), controller.summaryBusy);

@@ -17,6 +17,7 @@ public class NetworkTest {
         public void onAudio(byte[] data) { events.add("AUDIO:" + data.length); }
         public void onEnd(String id) { events.add("END"); }
         public void onError(String error) { events.add("ERROR:" + error); }
+        public void onWaitingForAudio(String warning) { events.add("WAITING"); }
         String next() throws Exception { return events.poll(5, TimeUnit.SECONDS); }
     }
     private static WebSocketAudioReceiver receiver(MockWebServer server) {
@@ -53,6 +54,34 @@ public class NetworkTest {
                 assertEquals("STOP r1", commands.poll(3, TimeUnit.SECONDS));
                 assertEquals("AUDIO:640", events.next()); assertEquals("END", events.next());
                 assertEquals(AudioReceiver.StopResult.NOT_RECORDING, receiver.requestStop());
+            }
+        }
+    }
+    @Test public void audioPauseWarnsWithoutDisconnectAndStillAcceptsStopAndTail() throws Exception {
+        BlockingQueue<String> commands = new LinkedBlockingQueue<>();
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(new MockResponse().withWebSocketUpgrade(new WebSocketListener() {
+                @Override public void onOpen(WebSocket ws, Response response) {
+                    ws.send(START.replace("\"version\":1", "\"version\":1,\"control\":\"stop-v1\""));
+                    ws.send(ByteString.of(new byte[3200]));
+                }
+                @Override public void onMessage(WebSocket ws, String command) {
+                    commands.add(command);
+                    ws.send(ByteString.of(new byte[3200]));
+                    ws.send("{\"type\":\"end\",\"id\":\"r1\",\"bytes\":6400}");
+                }
+            }));
+            server.start();
+            try (WebSocketAudioReceiver receiver = receiver(server)) {
+                Events events = new Events(); receiver.connect("192.168.1.5", events);
+                assertEquals("CONNECTING", events.next()); assertEquals("CONNECTED", events.next());
+                assertEquals("START", events.next()); assertEquals("AUDIO:3200", events.next());
+                assertEquals("WAITING", events.events.poll(7, TimeUnit.SECONDS));
+                assertNull(events.events.poll(100, TimeUnit.MILLISECONDS));
+                assertEquals(AudioReceiver.StopResult.SENT, receiver.requestStop());
+                assertEquals("STOP r1", commands.poll(3, TimeUnit.SECONDS));
+                assertEquals("AUDIO:3200", events.next()); assertEquals("END", events.next());
+                assertEquals(1, server.getRequestCount());
             }
         }
     }

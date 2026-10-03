@@ -49,38 +49,13 @@ public final class VoiceController extends AndroidViewModel {
         }
     };
     public boolean summaryBusy;
+    public long summaryStartedAt;
+    private volatile long summaryGeneration;
     public String summaryMessage = "";
     private final ConversationStore history;
     private final SpeechEngine recognizer;
     public final SpeechSettings speech;
-    private GlyphDiscovery discovery;
-    private final java.util.Map<String, GlyphAnnouncement> boards = new java.util.LinkedHashMap<>();
-    private final java.util.Map<String, Long> boardSeen = new java.util.HashMap<>();
-    public List<GlyphAnnouncement> discoveredBoards = Collections.emptyList();
-    private String selectedBoard = "";
     private String activeAddress = "";
-    private long discoveryStarted;
-    private String discoveryError = "";
-    private final Runnable discoveryTick = new Runnable() {
-        @Override public void run() {
-            if (closed || !wanted || discovery == null) return;
-            if (!discoveryError.isEmpty()) { serviceMessage = discoveryError; publish(); return; }
-            long now = android.os.SystemClock.elapsedRealtime();
-            boards.keySet().removeIf(id -> now - boardSeen.getOrDefault(id, 0L) > 8000);
-            boardSeen.keySet().retainAll(boards.keySet());
-            discoveredBoards = new java.util.ArrayList<>(boards.values());
-            if (selectedBoard.isEmpty() && now - discoveryStarted >= 3000 && boards.size() == 1)
-                selectBoard(discoveredBoards.get(0));
-            if (selectedBoard.isEmpty()) serviceMessage = boards.size() > 1
-                    ? "Several Glyph boards found. Tap Choose Glyph."
-                    : "Finding Glyph… Enable your 2.4 GHz hotspot and power on the configured board.";
-            else if (!boards.containsKey(selectedBoard)) serviceMessage = boards.isEmpty()
-                    ? "Finding your saved Glyph… Check its power and hotspot settings."
-                    : "Your saved Glyph is unavailable. Tap Choose Glyph to select another board.";
-            publish();
-            main.postDelayed(this, 1000);
-        }
-    };
     private final ModelManager models;
     private final StreamingTranscriptionSession session;
     private final AudioReceiver receiver;
@@ -211,25 +186,6 @@ public final class VoiceController extends AndroidViewModel {
         publish();
     }
     public void prepareModel() { if (!modelBusy && !modelReady) loadModel(false); }
-    public boolean needsBoardChoice() { return wanted && (selectedBoard.isEmpty() ? discoveredBoards.size() > 1
-            : !boards.containsKey(selectedBoard) && !discoveredBoards.isEmpty()); }
-    public void selectBoard(GlyphAnnouncement board) {
-        if (!wanted || !boards.containsKey(board.id)) return;
-        selectedBoard = board.id;
-        preferences.edit().putString("board_id", board.id).apply();
-        useBoard(board);
-    }
-    private void useBoard(GlyphAnnouncement board) {
-        if (!wanted || !selectedBoard.equals(board.id)) return;
-        if (!board.address.equals(activeAddress) && !session.isBusy()) {
-            receiver.disconnect();
-            activeAddress = board.address;
-            preferences.edit().putString("address", activeAddress).apply();
-        }
-        serviceMessage = "Detected " + board + (speech.cloud() ? " · Cloud speech enabled" : "");
-        maybeConnect();
-        publish();
-    }
     public void saveSpeech(boolean cloud, String endpoint, String model, String key, boolean clear, Consumer<String> done) {
         if (backgroundActive || session.isBusy() || modelBusy) { done.accept("Disconnect Glyph before changing speech settings."); return; }
         modelBusy = true;
@@ -279,7 +235,9 @@ public final class VoiceController extends AndroidViewModel {
         return true;
     }
     public boolean selectSummary(Entry entry) {
-        if (session.isBusy() || !"Complete".equals(entry.status) || deletedSummaryIds.contains(entry.id)) return false;
+        boolean readable = "Complete".equals(entry.status)
+                || ("Not saved".equals(entry.status) && !entry.text.isEmpty());
+        if (session.isBusy() || !readable || deletedSummaryIds.contains(entry.id)) return false;
         selected = entry; selectedSummary = true; summaryForOriginal = null; viewRevision++;
         publish(); return true;
     }
@@ -340,6 +298,8 @@ public final class VoiceController extends AndroidViewModel {
         if (summaryBusy || pendingSummary == null) return;
         Entry source = pendingSummary; pendingSummary = null;
         summaryBusy = true;
+        summaryStartedAt = android.os.SystemClock.elapsedRealtime();
+        final long generation = ++summaryGeneration;
         summaryViewRevision = pendingSummaryViewRevision;
         final long targetView = pendingSummaryViewRevision;
         summaryClient.prepare();
@@ -350,6 +310,7 @@ public final class VoiceController extends AndroidViewModel {
         summaryWorker.execute(() -> {
             Entry pending = null;
             Entry completed = null;
+            boolean saveFailed = false;
             String message;
             try {
                 if (source.text.length() > SummaryClient.MAX_TEXT_CHARS)
@@ -363,12 +324,23 @@ public final class VoiceController extends AndroidViewModel {
                 if (!"Complete".equals(pending.status)) {
                     String summary = summaryClient.summarize(provider, key, model, source.text);
                     Entry row = pending;
-                    boolean kept = historyWorker.submit(() -> history.finishSummary(row, summary, "Complete")).get();
-                    if (kept) completed = new Entry(row.id, summary, "Complete", row.created, row.sourceId, row.source, row.provider, row.model);
+                    try {
+                        boolean kept = historyWorker.submit(() -> {
+                            if (generation != summaryGeneration) return false;
+                            return history.finishSummary(row, summary, "Complete");
+                        }).get();
+                        if (kept) completed = new Entry(row.id, summary, "Complete", row.created, row.sourceId, row.source, row.provider, row.model);
+                    } catch (Exception storageError) {
+                        // A good provider response must remain available to copy,
+                        // even if local storage fails. Never claim it was saved.
+                        completed = new Entry(row.id, summary, "Not saved", row.created, row.sourceId, row.source, row.provider, row.model);
+                        saveFailed = true;
+                    }
                 } else {
                     completed = pending;
                 }
-                message = completed == null ? "Summary was deleted; result discarded." : "English summary saved on this phone · " + provider.label;
+                message = saveFailed ? "Summary received but couldn't be saved. Copy it before closing this session."
+                        : completed == null ? "Summary was deleted or cancelled; result discarded." : "English summary saved on this phone · " + provider.label;
             } catch (Exception e) {
                 message = e instanceof IOException ? e.getMessage() : "Couldn't save or finish summary. Check storage and retry.";
                 if (pending != null && !closed) {
@@ -380,22 +352,31 @@ public final class VoiceController extends AndroidViewModel {
             }
             final String status = message;
             final Entry result = completed;
+            final Entry storedRequest = pending;
             main.post(() -> {
                 if (closed) return;
                 summaryBusy = false; summaryMessage = status;
+                boolean cancelled = generation != summaryGeneration;
+                if (cancelled) {
+                    summaryMessage = "Summary cancelled. The provider may already have received/billed the text.";
+                    if (storedRequest != null && !"Complete".equals(storedRequest.status)) historyWorker.execute(() -> {
+                        try { history.finishSummary(storedRequest, "", "Cancelled"); }
+                        catch (Exception ignored) { storageFailed(); }
+                    });
+                }
                 activeSummaryId = "";
                 boolean deleted = result != null && deletedSummaryIds.contains(result.id);
                 if (deleted) summaryMessage = "Summary deleted from this phone.";
                 // A reply for an older recording must never replace a new live
                 // recording, a different history selection, or a deleted view.
-                if (result != null && !deleted && viewRevision == targetView && !session.isBusy()) {
+                if (result != null && !deleted && !cancelled && viewRevision == targetView && !session.isBusy()) {
                     selected = result; selectedSummary = true; summaryForOriginal = null; viewRevision++;
                 }
                 refreshHistory(); publish(); pumpAutomaticSummaries();
             });
         });
     }
-    public void cancelSummary() { pendingSummary = null; automaticSummaries.clear(); summaryClient.cancel(); }
+    public void cancelSummary() { ++summaryGeneration; pendingSummary = null; automaticSummaries.clear(); summaryClient.cancel(); }
     public void deleteEntry(Entry entry, boolean summary) {
         if (summary) deletedSummaryIds.add(entry.id);
         else deletedRawIds.add(entry.id);
@@ -450,41 +431,21 @@ public final class VoiceController extends AndroidViewModel {
     public void connect(String address) {
         try {
             if (session.isBusy()) { session.onError("Wait for the current recording to finish."); return; }
+            LocalEndpoint.url(address);
             wanted = true;
-            if ("auto".equals(address)) {
-                activeAddress = "";
-                selectedBoard = preferences.getString("board_id", "");
-                boards.clear(); boardSeen.clear(); discoveredBoards = Collections.emptyList();
-                if (discovery != null) discovery.close();
-                GlyphDiscovery current = new GlyphDiscovery(); discovery = current;
-                discoveryStarted = android.os.SystemClock.elapsedRealtime();
-                discoveryError = "";
-                serviceMessage = "Finding Glyph on your hotspot…";
-                current.start(board -> main.post(() -> {
-                    if (closed || !wanted || discovery != current) return;
-                    // Bound unsolicited LAN traffic; an existing board may always refresh itself.
-                    if (boards.size() >= 16 && !boards.containsKey(board.id)) return;
-                    boards.put(board.id, board); boardSeen.put(board.id, android.os.SystemClock.elapsedRealtime());
-                    if (selectedBoard.equals(board.id)) useBoard(board);
-                }), error -> main.post(() -> { if (!closed && discovery == current) { discoveryError = error; serviceMessage = error; publish(); } }));
-                main.removeCallbacks(discoveryTick); main.post(discoveryTick);
-            } else {
-                LocalEndpoint.url(address);
-                activeAddress = address.trim();
-                preferences.edit().putString("address", activeAddress).apply();
-            }
+            activeAddress = address.trim();
+            serviceMessage = "Glyph at " + activeAddress + (speech.cloud() ? " · Cloud speech enabled" : "");
+            preferences.edit().putString("address", activeAddress).apply();
             // A started service may be recreated after permission/settings screens.
             // Queue the address until its local model is ready.
             maybeConnect();
         } catch (IllegalArgumentException e) { session.onError(e.getMessage()); }
     }
     public void disconnect() {
-        wanted = false; main.removeCallbacks(discoveryTick);
-        if (discovery != null) { discovery.close(); discovery = null; }
-        boards.clear(); boardSeen.clear(); discoveredBoards = Collections.emptyList(); activeAddress = "";
+        wanted = false; activeAddress = "";
+        serviceMessage = "";
         automaticSummaries.clear(); receiver.disconnect(); session.pause();
     }
-    public void forgetBoard() { selectedBoard = ""; preferences.edit().remove("board_id").apply(); }
     public void retryModelSetup() {
         if (modelBusy || session.isBusy()) return;
         receiver.disconnect();
@@ -554,8 +515,6 @@ public final class VoiceController extends AndroidViewModel {
     private static final class InsufficientMemoryException extends Exception { }
     @Override protected void onCleared() {
         closed = true;
-        main.removeCallbacks(discoveryTick);
-        if (discovery != null) discovery.close();
         main.removeCallbacks(stopTimeout);
         automaticSummaries.clear(); summaryStarter = () -> {};
         stateDelivery.close();

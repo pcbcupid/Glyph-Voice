@@ -1,0 +1,236 @@
+---
+title: "GLYPH Voice Kit"
+description: "Name your Glyph, connect over Wi-Fi and transcribe locally on Android or your computer — no Arduino IDE needed."
+---
+
+{/* Publication draft for learn.pcbcupid.com/guides/kits/glyph-voice.
+    Based on the existing PCB Cupid guide; replaces its old Bluetooth/discovery
+    and shared-hotspot-password flow. Publish matching r11 firmware/current APK
+    and source before publishing this page. Never link an old release as r11. */}
+
+## Voicing your thoughts
+
+GLYPH Voice turns your microphone and PCB Cupid GLYPH C6 into a button-operated
+transcription tool. Click **BOOT once to start**, speak, then **click again to stop**.
+Your words appear live and the final transcript stays available to read and copy.
+
+Choose **Android** for on-phone recognition and background recording, or the
+**React web app** with a local model server on your Windows, Linux or Mac computer.
+No account or cloud speech service is required in local mode.
+
+```text
+Microphone → GLYPH C6 → local Wi-Fi → Android OR your computer's local model → text
+```
+
+<Note>
+  This guide describes firmware **transport-r11** and the current app/web source.
+  It uses manual IP connection, personal setup hotspots and no Bluetooth.
+  Check release notes and the serial firmware banner: older downloads may use
+  different setup screens. A website update alone does not update a board or APK.
+</Note>
+
+## What you need
+
+- GLYPH C6 with the kit's compatible I²S microphone already connected.
+- USB **data** cable and a desktop computer with Chrome or Edge for flashing/setup.
+- Trusted **2.4 GHz WPA2 Wi-Fi**, or a phone hotspot in compatibility mode.
+- **Android path:** Android 8+ / 64-bit phone, at least 2 GB free storage for the
+  bundled English model. Performance depends on available RAM/CPU.
+- **Web path:** Windows x64, Linux x86_64 glibc, or modern macOS Intel/Apple Silicon.
+  Allow at least 5 GB disk space and plan for 4–6 GB available RAM during inference.
+  Internet is needed for initial tool/model downloads, not later local recognition.
+
+Need to assemble the kit? Follow the maintained
+[hardware and wiring guide](https://github.com/pcbcupid/Glyph-Voice/blob/main/kit/HARDWARE.md).
+GPIO14 is the connection LED; BOOT uses GPIO9. This update does not change microphone wiring.
+
+## 1. Download the workshop files
+
+Use the instructor's current package or matching
+[GitHub Release](https://github.com/pcbcupid/Glyph-Voice/releases). Check that its
+notes explicitly include **r11 personal hotspot setup**.
+
+| File | Who needs it? |
+| --- | --- |
+| Complete merged GLYPH C6 firmware `.bin` | Everyone flashing a new board; flash at **0x0** |
+| Matching Android `.apk` | Android users; already includes the English model |
+| Project source ZIP | Web users; extract the entire folder, not just the installer |
+| `SHA256SUMS` supplied with the binaries | Check downloaded file integrity |
+
+The raw build filename is **glyph_voice.ino.merged.bin**. An instructor may rename
+it for a release; confirm that it is the **merged/full image**. Do not use an
+app-only `.bin` at 0x0. Maintainers can build with the
+[firmware instructions](https://github.com/pcbcupid/Glyph-Voice/blob/main/firmware/README.md).
+The hidden `.tools` build directory is not part of a GitHub source ZIP.
+
+## 2. Flash in your browser
+
+No Arduino IDE or Python installation is needed to flash.
+
+1. Connect the board by USB. Close other programs/tabs using its serial port.
+2. Open the official [Espressif browser flasher](https://espressif.github.io/esptool-js/)
+   in desktop Chrome/Edge. In **Program**, click **Connect** and select your port.
+3. Confirm the detected chip is **ESP32-C6**. If a tool asks for a chip, choose C6,
+   not generic ESP32, C3 or S3. No Arduino board package is needed.
+4. Choose the **merged** firmware file, set **Flash Address `0x0`**, retain the
+   image's settings and click **Program**. Wait until it finishes.
+5. Disconnect the flasher. Reset with BOOT **released** to run the application.
+
+If the flasher cannot connect: hold BOOT, tap RESET, then release BOOT and retry.
+That enters the flashing bootloader. For Wi-Fi setup later, tap BOOT **after**
+normal boot starts instead. A full firmware image can clear saved Wi-Fi settings;
+expect to configure the board again. Only one tab can own the serial port.
+
+## 3. Give your board its own hotspot name
+
+The Espressif example Console is for viewing output. To enter answers, disconnect
+it and open the write-capable
+[Chrome Labs Serial Terminal](https://googlechromelabs.github.io/serial-terminal/).
+
+1. Connect at **115200 baud**, 8 data bits, no parity, 1 stop bit, hardware flow
+   control off. Set **Local echo OFF** and **Flush on enter ON**.
+2. Reset with BOOT released. Serial shows **3...2...1**. Tap BOOT within those
+   three seconds to configure; doing nothing uses the last saved Wi-Fi.
+   A first-time board enters setup automatically.
+3. At **STEP 1/2**, type a label such as **Alice** or **Kit12**, then Enter.
+   Use 1–19 letters/numbers/hyphens/underscores, without spaces.
+4. At **STEP 2/2**, enter a private password for the **board's setup hotspot**,
+   then Enter. Use 8–63 printable ASCII characters and retype it to confirm.
+   Keep it private and do not reuse an account/router password.
+5. Wait a few seconds. Serial prints your hotspot, for example
+   **GLYPH-Alice-865690**. Its hardware suffix helps distinguish boards even if
+   two people choose Alice. Always match your own serial output.
+
+<Tip>
+  Firmware never echoes passwords. With local echo off, not seeing characters is
+  expected. Type one answer and press Enter. On later setup, Enter can keep the
+  previous label/password. To replace a forgotten hotspot password, enter a new
+  one over USB. There is no typing timeout.
+</Tip>
+
+Missed the countdown? Send **WIFI SETUP** + Enter when no Android/web app is
+connected. **STATUS** prints current instructions/IP; **HELP** lists commands.
+During naming prompts, input is treated as an answer rather than a command.
+
+## 4. Connect the board to your Wi-Fi
+
+These are **two different networks**: first join the board's setup hotspot;
+then tell it which router/phone hotspot to use for recording.
+
+1. Join the printed **GLYPH-name-suffix** Wi-Fi with the hotspot password you chose.
+   Accept **No internet / Stay connected**.
+2. Open **http://192.168.4.1/** manually if the page doesn't appear. Use HTTP.
+3. Enter your **router/phone hotspot's** Wi-Fi name and password, then **Save and restart**.
+   Do not enter the board hotspot name again.
+4. Wait up to **30 seconds** while the board checks connectivity. It saves only
+   after success and then restarts. **Leave BOOT released** on that restart.
+   If joining fails, reconnect to the same board hotspot and correct the settings;
+   previously saved router settings are retained.
+5. Return the phone/computer to your normal Wi-Fi. Copy the board's new
+   **[ready] IP:8080** from serial for the app's **Connect Glyph** dialog.
+
+Use **2.4 GHz / WPA2 Personal**. Enterprise, captive-login and 5 GHz-only Wi-Fi
+are not supported. Passwordless trusted Wi-Fi requires explicitly checking
+**Open network**. If the same phone will host the target hotspot, save first,
+then turn its hotspot on immediately; using a separate setup computer is easier.
+
+The setup address **192.168.4.1 is not normally the recording address**. Each
+board uses a separate setup network; normal recording IPs come from the router
+and may change. Read your own board's latest IP, not your neighbour's.
+
+| LED on GPIO14 | Meaning |
+| --- | --- |
+| Blinking | Firmware running; no router Wi-Fi IP yet |
+| Steady on | Wi-Fi connected with an IP; app/model may still need connecting |
+
+## 5A. Use the Android app
+
+1. Install the matching APK; allow installation from the browser/file manager if
+   Android asks. You don't need the computer web installer for Android recording.
+2. Enable the configured phone hotspot, or join the same router as the board.
+3. Open **GLYPH VOICE → Connect Glyph** and enter the serial **IP:8080**.
+4. Review notification/background permissions. Let the bundled local Parakeet
+   model finish preparing; no model download is needed on the phone.
+5. Wait for **Connected**, click BOOT once and speak. Click again to finish, or
+   use **Stop & summarize**. Only the physical button starts recording.
+
+Android's foreground service supports background/locked-screen work, subject to
+the phone manufacturer's power management. Local speech remains on the phone.
+See the [Android guide](https://github.com/pcbcupid/Glyph-Voice/blob/main/kit/APP.md).
+
+## 5B. Use the web app
+
+Extract the project ZIP. Open a terminal in its folder and run **one** installer:
+
+| OS | Install once, online | Start each time |
+| --- | --- | --- |
+| Windows x64 | `installation\install.cmd` | `start-web.cmd` |
+| Linux x86_64 | `bash installation/install.sh` | `bash start-web.sh` |
+| macOS Intel/Apple Silicon | `bash installation/install-macos.command` | `bash start-web.sh` |
+
+Windows can double-click the `.cmd` files. The installers supply private Python,
+Node, web/server dependencies and the English model. No Arduino tools or system
+PATH changes. Model download is about 501 MB; prepare before the workshop.
+[Installer help](https://github.com/pcbcupid/Glyph-Voice/blob/main/installation/README.md).
+
+1. Run the start command. It opens **http://localhost:8765**. Keep the terminal open.
+2. **Connect Glyph** → your board's serial IP → **Next: speech recognition**.
+3. Choose **Local model**, paste the private **server access token** printed by
+   the launcher, and confirm audio processing on your trusted computer.
+4. **Choose model folder** → the installed Parakeet Unified streaming folder →
+   **Load this model locally**. Wait for loading/warm-up and **Glyph connected**.
+5. Click BOOT, speak, click again to finish. Keep the page visible and computer
+   awake. Ctrl+C in the launcher terminal stops the backend.
+
+<Warning>
+  Web Parakeet runs on the computer hosting the Python server, **not inside the
+  iPhone browser**. The web page is foreground-only: hiding/locking it can interrupt
+  recording. Default startup is localhost-only. Phone/iPhone access requires the
+  explicit trusted-LAN/HTTPS configuration in the server guide; the computer must
+  stay running. Android and web cannot use the same board simultaneously.
+</Warning>
+
+[Phone/LAN hosting and model-folder guide](https://github.com/pcbcupid/Glyph-Voice/blob/main/server/README.md).
+After installation, local transcription works without internet while local Wi-Fi
+remains available. There is no automatic cloud fallback. A restart gives a new
+server token; refreshing clears tab-only credentials, not saved browser history.
+
+## Transcripts, summaries and privacy
+
+The left drawer keeps raw conversations; the right keeps summaries and settings.
+Copy copies the displayed text. You can delete individual entries. A stopped
+recording remains visible, and Android/browser histories stay separate and local.
+There is no fixed recording-duration cutoff; CPU, memory and network limits still apply.
+
+Summaries are **optional cloud text processing**, separate from local speech.
+Open **Connect your API**, select DeepSeek/OpenAI, enter your own key and review
+text-sharing settings. Clean BOOT-stop auto-summarizes when configured/enabled.
+**Stop & summarize** can stop the board; it waits for the final transcript before
+sending text. Without configuration, manual Summarize opens setup. Results appear
+in the same box and are saved to the right drawer; failure keeps the original.
+
+Cloud summaries send transcript text to the selected provider and need internet;
+provider billing/retention apply. Optional cloud STT sends audio only if explicitly
+selected. Local mode does not upload speech to a cloud service. The prototype's
+HTTP setup and unauthenticated audio socket are intended for a **trusted LAN**;
+names are identifiers, not access control. Never put server tokens/API keys or
+passwords in shared screenshots. Project MIT licensing does not replace the
+[model/dependency licenses](https://github.com/pcbcupid/Glyph-Voice/blob/main/THIRD_PARTY_NOTICES.md).
+
+## Running a room of kits
+
+- One board and one local server/computer per web participant; Android participants
+  use their own phone. The backend is not a multi-user transcription service.
+- Match each board's serial suffix, hotspot and recording IP. Names avoid mix-ups,
+  not radio congestion. Avoid guest/client isolation on a shared router.
+- Prepare downloads before class. Keep browsers visible and computers awake.
+- If no hotspot appears, complete the serial naming prompts. If the port is busy,
+  disconnect the flasher and other monitors before opening Serial Terminal.
+- A steady LED only proves Wi-Fi readiness. Load the model and wait for Connected.
+- Queue-full/socket-write errors mean transport/receiver backpressure, not a
+  recording timer. Keep the complete fault logs and check the actual room network.
+- Rehearse two kits simultaneously, wrong-password retry, power-cycle reuse,
+  several minutes including silence, and internet-off/local-Wi-Fi-on transcription.
+
+[Full workshop checklist](https://github.com/pcbcupid/Glyph-Voice/blob/main/docs/WORKSHOP.md)
+· [Troubleshooting](https://github.com/pcbcupid/Glyph-Voice/blob/main/kit/CONNECTION.md)

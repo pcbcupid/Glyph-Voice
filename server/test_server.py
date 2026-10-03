@@ -1,18 +1,143 @@
 import asyncio
 import os
+import re
 from pathlib import Path
 import tempfile
+import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from aiohttp.test_utils import TestClient, TestServer
 from aiohttp import web
-from .app import create_app, glyph_address
-from .inference import Inference
+from .app import create_app, glyph_address, main as server_main
+from .inference import Inference, warm_up
 from .models import ModelFolders
 
 TOKEN = "test-token-not-real-1234567890"
 ORIGIN = "http://localhost:8765"
+
+
+class InferencePipeTests(unittest.IsolatedAsyncioTestCase):
+    async def wait_until_entered(self, entered):
+        async with asyncio.timeout(2):
+            while not entered.is_set():
+                await asyncio.sleep(.001)
+
+    async def check_blocked_io(self, stage):
+        entered, release = threading.Event(), threading.Event()
+        caller_threads = []
+        def blocked(*unused):
+            caller_threads.append(threading.get_ident())
+            entered.set()
+            release.wait(2)  # Safety bound even if a regression blocks the event loop.
+            return {"ok": True, "text": "fixture"}
+        engine = Inference()
+        engine.pipe = Mock()
+        engine.pipe.poll.return_value = True
+        engine.pipe.recv.return_value = {"ok": True, "text": "fixture"}
+        getattr(engine.pipe, stage).side_effect = blocked
+        task = asyncio.create_task(engine._command("audio", b"\0\0" * 3200))
+        try:
+            await self.wait_until_entered(entered)
+            # This coroutine must run while IPC is blocked. The old synchronous
+            # send/recv ran on this thread and could stop bridge socket reads.
+            self.assertNotEqual(caller_threads, [threading.get_ident()])
+            self.assertFalse(task.done())
+            release.set()
+            self.assertEqual((await task)["text"], "fixture")
+            engine.pipe.send.assert_called_once_with(("audio", b"\0\0" * 3200))
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_slow_pipe_send_does_not_block_network_event_loop(self):
+        await self.check_blocked_io("send")
+
+    async def test_readable_but_incomplete_reply_does_not_block_network_event_loop(self):
+        await self.check_blocked_io("recv")
+
+    async def test_incomplete_reply_still_has_deadline_and_stops_worker(self):
+        release = threading.Event()
+        engine = Inference()
+        engine.pipe = Mock()
+        engine.pipe.poll.return_value = True
+        engine.pipe.recv.side_effect = lambda: release.wait(2)
+        with patch.object(engine, "stop", side_effect=release.set) as stop:
+            try:
+                with self.assertRaisesRegex(RuntimeError, "timed out"):
+                    await engine._reply(timeout=.03)
+                stop.assert_called_once_with()
+            finally:
+                release.set()
+
+    async def test_cancelling_blocked_writer_stops_worker_before_pipe_can_be_reused(self):
+        entered, release = threading.Event(), threading.Event()
+        def send(*unused):
+            entered.set()
+            release.wait(2)
+        engine = Inference()
+        engine.pipe = Mock()
+        engine.pipe.send.side_effect = send
+        with patch.object(engine, "stop", side_effect=release.set) as stop:
+            task = asyncio.create_task(engine._command("audio", b"\0\0"))
+            try:
+                await self.wait_until_entered(entered)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                stop.assert_called_once_with()
+                engine.pipe.recv.assert_not_called()
+            finally:
+                release.set()
+                await asyncio.gather(task, return_exceptions=True)
+
+
+class WarmupTests(unittest.TestCase):
+    def test_disposable_stream_runs_native_decode_before_readiness(self):
+        import numpy as np
+        engine = Mock()
+        engine.is_ready.side_effect = [True, True, False]
+        warm_up(engine, np)
+        engine.create_stream.assert_called_once_with()
+        stream = engine.create_stream.return_value
+        rate, samples = stream.accept_waveform.call_args.args
+        self.assertEqual(rate, 16000)
+        self.assertEqual(len(samples), 32000)
+        self.assertTrue(np.all(samples == 0))
+        stream.input_finished.assert_called_once_with()
+        self.assertEqual(engine.decode_stream.call_count, 2)
+        engine.decode_stream.assert_called_with(stream)
+
+
+class BrowserLauncherTests(unittest.TestCase):
+    def test_browser_opens_only_from_bound_server_callback_without_token_in_url(self):
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("sys.argv", ["server", "--models-dir", folder, "--open-browser"]), \
+             patch.dict(os.environ, {"GLYPH_LOCAL_TOKEN": TOKEN}), \
+             patch("builtins.print"), patch("server.app.webbrowser.open", return_value=True) as browser, \
+             patch("server.app.threading.Thread") as thread, \
+             patch("server.app.web.run_app") as run:
+            def bound(app, **kwargs):
+                browser.assert_not_called()
+                thread.assert_not_called()
+                kwargs["print"]("Server bound")
+                thread.call_args.kwargs["target"]()
+            run.side_effect = bound
+            server_main()
+            thread.return_value.start.assert_called_once_with()
+            browser.assert_called_once_with("http://localhost:8765")
+
+    def test_bind_failure_does_not_open_browser(self):
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("sys.argv", ["server", "--models-dir", folder, "--open-browser"]), \
+             patch.dict(os.environ, {"GLYPH_LOCAL_TOKEN": TOKEN}), \
+             patch("builtins.print"), patch("sys.stderr"), \
+             patch("server.app.threading.Thread") as thread, \
+             patch("server.app.web.run_app", side_effect=OSError("port busy")):
+            with self.assertRaises(SystemExit) as raised:
+                server_main()
+            self.assertEqual(raised.exception.code, 1)
+            thread.assert_not_called()
 
 
 class ModelTests(unittest.TestCase):
@@ -176,6 +301,13 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(os.environ.get("GLYPH_TEST_MODEL") and os.environ.get("GLYPH_TEST_WAV"), "Set local model and WAV fixture paths for real inference")
 class RealInferenceTest(unittest.IsolatedAsyncioTestCase):
+    def assert_opening_words(self, text):
+        prefix = os.environ.get("GLYPH_TEST_PREFIX")
+        if prefix:
+            normalize = lambda value: " ".join(re.findall(r"\w+", value.lower()))
+            self.assertTrue(normalize(text).startswith(normalize(prefix)),
+                            "Opening words were missing from the real transcript")
+
     @unittest.skipUnless(os.environ.get("GLYPH_TEST_HTTP"), "Set GLYPH_TEST_HTTP=1 for loopback HTTP integration")
     async def test_real_model_through_authenticated_http(self):
         import wave
@@ -197,7 +329,9 @@ class RealInferenceTest(unittest.IsolatedAsyncioTestCase):
                     seq += 1
             self.assertTrue(partial)
             response = await client.post(f"/api/streams/{stream_id}/finish", json={"sequence": seq}, headers=headers)
-            self.assertTrue((await response.json())["text"])
+            text = (await response.json())["text"]
+            self.assertTrue(text)
+            self.assert_opening_words(text)
 
     async def test_streaming_model_and_silence_without_network(self):
         import wave
@@ -215,6 +349,7 @@ class RealInferenceTest(unittest.IsolatedAsyncioTestCase):
                     sequence += 1
             result = await engine.finish(opened["id"], sequence)
             self.assertTrue(result["text"].strip())
+            self.assert_opening_words(result["text"])
             self.assertTrue(any(partials), "Expected partials before finish")
             print("Real local inference:", result["text"], flush=True)
             opened = await engine.open(info["modelId"], 16000)

@@ -21,6 +21,15 @@ the app. Sample speech is not embedded in the main application.
 | Gradle wrapper | 8.13 | [Apache-2.0](https://github.com/gradle/gradle) |
 | Arduino ESP32 core, firmware only | 3.3.10 | [LGPL-2.1 and bundled component notices](https://github.com/espressif/arduino-esp32) |
 | WebSockets by Markus Sattler, firmware only | 2.7.2 | [LGPL-2.1-or-later](https://github.com/Links2004/arduinoWebSockets) |
+| uv, web installer bootstrap | 0.12.22 | [MIT or Apache-2.0](https://github.com/astral-sh/uv) |
+| Managed CPython, web installer | 3.13 (uv-managed python-build-standalone) | [PSF and bundled notices](https://github.com/astral-sh/python-build-standalone) |
+| Node.js / npm, web installer | 24.21.0 / bundled npm | [Node MIT and bundled third-party notices](https://github.com/nodejs/node/blob/main/LICENSE) |
+
+The web installer downloads runtimes into `.tools/`; they are not part of the
+Android APK or tracked source. Retain the license files within their official
+distributions if repackaging them. Web dependencies use `web/package-lock.json`;
+backend dependencies use `server/requirements.txt`. The installer copies model
+attribution and the NVIDIA license beside the extracted web model as well.
 
 **Licensed by NVIDIA Corporation under the NVIDIA Open Model License.** The model
 creator is NVIDIA; ONNX INT8 conversion is from sherpa-onnx. Four inference files

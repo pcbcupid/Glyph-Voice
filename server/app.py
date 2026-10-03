@@ -8,11 +8,14 @@ from pathlib import Path
 import re
 import secrets
 import time
+import threading
+import webbrowser
 from urllib.parse import urlsplit
 
-from aiohttp import web, ClientSession, WSMsgType, TraceConfig
+from aiohttp import web, ClientSession, ClientTimeout, ClientWSTimeout, WSMsgType, TraceConfig
 from .inference import Inference
 from .models import ModelFolders
+from .summary import summarize, SummaryError
 
 
 def glyph_address(value: str, allowed: set[str]) -> str:
@@ -42,6 +45,7 @@ def create_app(models_root, token, origins, dist=None, glyph_hosts=(), inference
     for address in allowed_glyphs:
         glyph_address(address, allowed_glyphs)
     active_bridges = set()
+    summary_lock = asyncio.Lock()
 
     def authorized(value):
         return isinstance(value, str) and hmac.compare_digest(value.encode(), token.encode())
@@ -122,6 +126,27 @@ def create_app(models_root, token, origins, dist=None, glyph_hosts=(), inference
     async def cancel(request):
         return await locked(lambda: engine.cancel(request.match_info["id"]))
 
+    async def summary(request):
+        if summary_lock.locked():
+            return web.json_response({"error": "A summary is already running. Wait before retrying."}, status=409)
+        async with summary_lock:
+            task = None
+            try:
+                task = asyncio.create_task(summarize(await request.json()))
+                # Only this text relay is cancellable on disconnect. Do not cancel
+                # native STT operations halfway through a worker command.
+                while not task.done():
+                    await asyncio.wait({task}, timeout=0.25)
+                    if request.transport is None or request.transport.is_closing():
+                        raise asyncio.CancelledError()
+                return web.json_response({"text": await task})
+            except SummaryError as error:
+                return web.json_response({"error": str(error)}, status=400)
+            finally:
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
     async def bridge(request):
         # Tokens are in the first message, never URL/query/access logs.
         if request.headers.get("Origin") not in origins:
@@ -146,9 +171,13 @@ def create_app(models_root, token, origins, dist=None, glyph_hosts=(), inference
                 raise ValueError("Glyph redirects are not allowed")
             trace = TraceConfig()
             trace.on_request_redirect.append(reject_redirect)
-            async with ClientSession(trust_env=False, trace_configs=[trace]) as client:
+            # Audio is an open-ended session, not a finite HTTP download. Keep
+            # handshake/close/heartbeat checks, never a total recording deadline.
+            async with ClientSession(timeout=ClientTimeout(total=None, sock_connect=5, sock_read=None),
+                                     trust_env=False, trace_configs=[trace]) as client:
                 async with asyncio.timeout(5):
-                    board = await client.ws_connect(url, max_msg_size=16384, heartbeat=15, compress=0)
+                    board = await client.ws_connect(url, timeout=ClientWSTimeout(ws_receive=None, ws_close=5),
+                                                    max_msg_size=16384, heartbeat=15, compress=0)
                 async with board:
                     await ws.send_json({"proxy": "ready"})
 
@@ -191,6 +220,7 @@ def create_app(models_root, token, origins, dist=None, glyph_hosts=(), inference
     app.router.add_post("/api/streams/{id}/finish", finish)
     app.router.add_delete("/api/streams/{id}", cancel)
     app.router.add_get("/api/glyph", bridge)
+    app.router.add_post("/api/summary", summary)
     async def options(request):
         return web.Response(status=204)
     app.router.add_route("OPTIONS", "/api/{tail:.*}", options)
@@ -233,18 +263,39 @@ def main():
     parser.add_argument("--glyph-host", action="append", default=[], help="Allowed private Glyph IPv4 for optional same-origin WebSocket bridge")
     parser.add_argument("--threads", type=int, default=min(4, os.cpu_count() or 1))
     parser.add_argument("--dist", type=Path, default=Path(__file__).resolve().parents[1] / "web/dist")
+    parser.add_argument("--open-browser", action="store_true", help="Open the local web app after the server has bound its port")
     args = parser.parse_args()
     if not 1 <= args.threads <= 16:
         parser.error("--threads must be between 1 and 16")
     if args.host not in ("127.0.0.1", "localhost", "::1") and not args.origin:
         parser.error("LAN binding requires explicit --origin http(s)://your-host:port; no wildcard origins")
+    if args.open_browser and (args.host not in ("127.0.0.1", "localhost") or args.origin):
+        parser.error("--open-browser is only for default localhost hosting; open custom/LAN origins manually")
     token = os.environ.get("GLYPH_LOCAL_TOKEN") or secrets.token_urlsafe(32)
     origins = args.origin or [f"http://127.0.0.1:{args.port}", f"http://localhost:{args.port}"]
     app = create_app(args.models_dir, token, origins, args.dist, args.glyph_host, Inference(args.threads))
     print("Inference runs on THIS computer. No automatic model downloads or cloud STT.", flush=True)
     print("Private local server access token (enter in Speech recognition): " + token, flush=True)
     print("Allowed browser origins: " + ", ".join(origins), flush=True)
-    web.run_app(app, host=args.host, port=args.port, access_log=None)
+    def ready(message):
+        print(message, flush=True)
+        if args.open_browser:
+            url = f"http://localhost:{args.port}"
+            def open_page():
+                try:
+                    if webbrowser.open(url):
+                        return
+                except (OSError, webbrowser.Error):
+                    pass
+                print("Open this URL in your browser: " + url, flush=True)
+            # run_app invokes its print callback only after binding successfully.
+            # No token in URLs/browser history; failure to open is not server failure.
+            threading.Thread(target=open_page, daemon=True).start()
+    try:
+        web.run_app(app, host=args.host, port=args.port, access_log=None, print=ready)
+    except OSError:
+        parser.exit(1, f"Could not start the server on {args.host}:{args.port}. "
+                    "Stop an existing Glyph server or choose a different --port; check local socket permissions.\n")
 
 
 if __name__ == "__main__":

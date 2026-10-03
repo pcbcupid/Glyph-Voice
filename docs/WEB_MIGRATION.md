@@ -71,12 +71,11 @@ Real deployment/phone validation and summary parity remain outstanding.
   practical, but introduces internet/backend infrastructure and audio transit outside
   the LAN. Requires explicit approval and revised privacy/security design. Not built.
 
-The preview uses private IPv4 on HTTP **only for development**. The subsequent
-[Bluetooth setup update](BLUETOOTH_SETUP.md) can discover that IP and provision Wi-Fi
-in supported secure browsers (localhost is useful for development). It does not solve
-the HTTPS-to-ws:// audio boundary by itself; the new server bridge handles that hop.
-Safari's lack of Web Bluetooth still requires its fallback. No claim
-of production iPhone hotspot compatibility is made.
+The preview uses private IPv4 on trusted LAN HTTP or localhost. Current source has
+removed Bluetooth setup and discovery: both apps take the board IP from USB serial,
+and Wi-Fi configuration uses the startup BOOT portal. HTTPS pages still need the
+server bridge for the plain board WebSocket hop. See the [workshop guide](WORKSHOP.md).
+No claim of production iPhone hotspot compatibility is made.
 
 ## Boundaries worth retaining
 

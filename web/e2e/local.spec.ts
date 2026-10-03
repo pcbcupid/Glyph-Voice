@@ -8,6 +8,10 @@ test('choose server model folder, load, receive live local words and finish with
     id = 'b'.repeat(32);
   const external: string[] = [],
     requests: string[] = [];
+  let finishWarmup!: () => void;
+  const warming = new Promise<void>((resolve) => {
+    finishWarmup = resolve;
+  });
   page.on('request', (request) => {
     if (request.url().startsWith('https://')) external.push(request.url());
   });
@@ -31,6 +35,7 @@ test('choose server model folder, load, receive live local words and finish with
           : { path: 'Parakeet', parent: '.', folders: [], compatibleFiles: true };
     else if (url.pathname === '/api/model') {
       expect(request.postDataJSON()).toEqual({ folder: 'Parakeet' });
+      await warming;
       body = { model: 'Parakeet', modelId: 'a'.repeat(32) };
     } else if (url.pathname === '/api/streams') body = { id };
     else if (url.pathname.endsWith('/audio'))
@@ -56,16 +61,21 @@ test('choose server model folder, load, receive live local words and finish with
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect Glyph' }).click();
-  await page.getByRole('button', { name: 'Enter an existing Glyph IP' }).click();
+  await page.getByLabel('Glyph address').fill('192.168.4.2:8080');
+  await page.getByRole('button', { name: 'Next: speech recognition' }).click();
   await page.getByLabel('Local server access token').fill(token);
   await page.getByRole('checkbox', { name: /I trust this server/ }).check();
   await page.getByRole('button', { name: 'Choose model folder' }).click();
   await expect(page.getByRole('button', { name: 'Load this model locally' })).toBeDisabled();
   await page.getByRole('button', { name: /Parakeet/ }).click();
-  await page.screenshot({ path: test.info().outputPath('local-model-folder.png'), animations: 'disabled' });
+  await page.screenshot({
+    path: test.info().outputPath('local-model-folder.png'),
+    animations: 'disabled',
+  });
   await page.getByRole('button', { name: 'Load this model locally' }).click();
-  await page.getByLabel('Glyph address').fill('192.168.4.2:8080');
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Loading and warming up');
+  expect(socket).toBeUndefined(); // No board connection or recording during cold initialization.
+  finishWarmup();
   await expect(page.getByText('Glyph connected', { exact: true })).toBeVisible();
   socket.send(
     JSON.stringify({

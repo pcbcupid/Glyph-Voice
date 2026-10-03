@@ -14,6 +14,7 @@ type Job = {
   ended: boolean;
   cancelled: boolean;
   running: boolean;
+  waiting: boolean;
 };
 /** Browser-independent session owner. Receive never waits for recognition/network inference. */
 export class Session {
@@ -50,6 +51,7 @@ export class Session {
         ended: false,
         cancelled: false,
         running: false,
+        waiting: false,
       };
       this.state = {
         phase: 'receiving',
@@ -78,12 +80,17 @@ export class Session {
       }
       job.queue.push(event.pcm.slice());
       job.queuedBytes += event.pcm.length;
+      const resumed = job.waiting;
+      job.waiting = false;
       this.state = {
         ...this.state,
         bytes: this.state.bytes + event.pcm.length,
         packets: this.state.packets + 1,
+        message: this.state.conversation?.text
+          ? 'Listening · click BOOT again to stop'
+          : 'Receiving audio from the start · waiting for first words…',
       };
-      if (this.state.packets === 1 || this.state.packets % 25 === 0) this.emit();
+      if (resumed || this.state.packets === 1 || this.state.packets % 25 === 0) this.emit();
     } else {
       if (job.id !== event.id) throw new Error('Recording ID mismatch.');
       if (this.state.bytes < this.state.sampleRate / 5) {
@@ -144,7 +151,21 @@ export class Session {
   }
   private words(text: string, status: Conversation['status']) {
     if (this.state.conversation)
-      this.state = { ...this.state, conversation: { ...this.state.conversation, text, status } };
+      this.state = {
+        ...this.state,
+        message:
+          this.state.phase === 'receiving' && !this.job?.waiting
+            ? 'Listening · click BOOT again to stop'
+            : this.state.message,
+        conversation: { ...this.state.conversation, text, status },
+      };
+    this.emit();
+  }
+  /** Packet silence is not a completed recording or a transport disconnect. */
+  waitingForAudio(message: string) {
+    if (!this.job || this.job.ended || this.job.cancelled) return;
+    this.job.waiting = true;
+    this.state = { ...this.state, message };
     this.emit();
   }
   /** A valid end may still finalize after a socket disconnect. Explicit leave/cancel always interrupts. */

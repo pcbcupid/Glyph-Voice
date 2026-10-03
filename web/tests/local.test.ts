@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { LocalApi, LocalRecognizer, validateLocal } from '../src/speech/LocalRecognizer';
+import { Session } from '../src/core/Session';
 const config = {
   url: 'http://localhost:8765',
   token: 'test-token-not-real-1234567890',
@@ -10,6 +11,53 @@ const config = {
 const format = { sampleRate: 16000, channels: 1 as const, encoding: 'pcm_s16le' as const };
 const id = 'b'.repeat(32);
 afterEach(() => vi.unstubAllGlobals());
+it('keeps every opening sample while stream startup stalls, even if BOOT stops before it is ready', async () => {
+  let start!: (response: Response) => void;
+  const received: Uint8Array[] = [];
+  const sequences: number[] = [];
+  vi.stubGlobal('fetch', async (url: string, request: RequestInit) => {
+    if (url.endsWith('/streams'))
+      return new Promise<Response>((resolve) => {
+        start = resolve;
+      });
+    if (url.endsWith('/audio')) {
+      received.push(new Uint8Array(await (request.body as Blob).arrayBuffer()));
+      const sequence = Number((request.headers as Record<string, string>)['X-Audio-Sequence']);
+      sequences.push(sequence);
+      return new Response(JSON.stringify({ text: 'Opening words retained', sequence }));
+    }
+    return new Response('{"text":"Opening words retained through the end."}');
+  });
+  const stop = vi.fn();
+  const session = new Session(
+    new LocalRecognizer(config),
+    () => {},
+    () => {},
+    stop,
+  );
+  session.accept({ type: 'start', id: 'first', format, remoteStop: true });
+  // 10 seconds of distinct PCM at 20 ms per board packet; the stream-open response
+  // remains pending for the entire arrival period. No blank/silent fixture can hide loss.
+  const source = Uint8Array.from({ length: 320000 }, (_, i) => (i * 17 + 3) % 251);
+  for (let offset = 0; offset < source.length; offset += 640)
+    session.accept({ type: 'audio', pcm: source.slice(offset, offset + 640) });
+  session.accept({ type: 'end', id: 'first' });
+  expect(session.state.bytes).toBe(source.length);
+  expect(session.state.phase).toBe('processing');
+  expect(received).toHaveLength(0);
+  start(new Response(JSON.stringify({ id })));
+  await vi.waitFor(() => expect(session.state.phase).toBe('result'));
+  const joined = new Uint8Array(received.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  for (const part of received) {
+    joined.set(part, offset);
+    offset += part.length;
+  }
+  expect(joined).toEqual(source);
+  expect(sequences).toEqual(Array.from({ length: 50 }, (_, i) => i));
+  expect(stop).not.toHaveBeenCalled();
+  expect(session.state.conversation?.text).toBe('Opening words retained through the end.');
+});
 it('rejects URL credentials, paths, query secrets, invalid tokens and HTTPS downgrades', () => {
   for (const url of [
     'http://a:pass@localhost:8765',

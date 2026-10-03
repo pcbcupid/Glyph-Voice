@@ -21,6 +21,7 @@ export class WebSocketReceiver implements AudioReceiver {
     private event: (event: AudioEvent) => void,
     private connection: (value: Connection) => void,
     private error: (message: string) => void,
+    private waiting: (message: string) => void = () => {},
   ) {}
   connect(address: string) {
     const direct = localEndpoint(address, this.proxy ? 'http:' : location.protocol);
@@ -86,7 +87,10 @@ export class WebSocketReceiver implements AudioReceiver {
           clearTimeout(this.deadline);
           if (this.protocol.recording)
             this.deadline = setTimeout(
-              () => this.fail('No audio for five seconds. Recording interrupted.'),
+              () =>
+                this.waiting(
+                  'Waiting for Glyph audio… The connection is still open; recording has not been stopped.',
+                ),
               5000,
             );
           this.event(value);

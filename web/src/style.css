@@ -42,117 +42,47 @@ section[aria-label='Self-hosted local model'] label:not(.check) {
   display: block;
   margin-top: 12px;
 }
-.glyph-radar {
-  width: min(270px, 85%);
-  aspect-ratio: 1;
-  margin: 22px auto;
-  position: relative;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  background: var(--card);
-  isolation: isolate;
-  overflow: hidden;
-}
-.glyph-radar::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: conic-gradient(from 0deg, transparent 260deg, #80ba662c 350deg, #80ba6680 360deg);
-  opacity: 0;
-}
-.glyph-radar.sweeping::before {
-  opacity: 1;
-  animation: radar-sweep 3.2s linear infinite;
-}
-.radar-ring {
-  position: absolute;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  inset: 16.66%;
-}
-.radar-ring.ring-two {
-  inset: 33.33%;
-}
-.radar-axis {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(transparent calc(50% - 0.5px), var(--line) 50%, transparent calc(50% + 0.5px)),
-    linear-gradient(
-      90deg,
-      transparent calc(50% - 0.5px),
-      var(--line) 50%,
-      transparent calc(50% + 0.5px)
-    );
-}
-.radar-center {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  background: var(--ink);
-  color: var(--accent);
-  padding: 12px;
-  border-radius: 50%;
-}
-.radar-device {
-  position: absolute;
-  top: 24%;
-  left: 51%;
-  background: var(--card);
-  border: 1px solid var(--line);
-  box-shadow: 0 3px 15px #0001;
-  border-radius: 8px;
-  padding: 8px;
-  font-size: 10px;
-  display: flex;
-  gap: 5px;
-  align-items: center;
-}
-.radar-device > span {
-  height: 6px;
-  width: 6px;
-  border-radius: 50%;
-  background: #5a9446;
-}
-.selected-glyph {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 15px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  margin: 16px 0;
-}
-.selected-glyph strong {
-  font-size: 14px;
-}
-.selected-glyph small {
-  display: block;
-  font-size: 11px;
+.connection-intro {
   color: var(--muted);
 }
-.setup-alternatives {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  margin-top: 10px;
+.connection-steps {
+  list-style: none;
+  counter-reset: connection-step;
+  padding: 0;
+  margin: 24px 0;
+  display: grid;
+  gap: 18px;
 }
-.radar-status {
-  min-height: 48px;
+.connection-steps li {
+  counter-increment: connection-step;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 12px;
 }
-@keyframes radar-sweep {
-  to {
-    transform: rotate(360deg);
-  }
+.connection-steps li::before {
+  content: counter(connection-step);
+  grid-row: span 2;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #182b28;
+  font-size: 14px;
+  font-weight: 600;
 }
-@media (prefers-reduced-motion: reduce) {
-  .glyph-radar.sweeping::before {
-    animation: none;
-  }
+.connection-steps strong {
+  font-size: 15px;
+}
+.connection-steps span,
+.connection-hint {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.connection-hint {
+  margin: 8px 0 16px;
 }
 :root {
   font-family:
@@ -557,7 +487,35 @@ dialog::backdrop {
   font-weight: 600;
   margin: 16px 0;
 }
-.modal input:not([type='checkbox']) {
+.summary-status {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 14px;
+}
+.summary-status p {
+  margin: 0 0 6px;
+}
+.summary-status small {
+  display: block;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.update-notice {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.update-notice p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.modal input:not([type='checkbox']),
+.modal select {
   display: block;
   width: 100%;
   padding: 13px 12px;
@@ -782,6 +740,14 @@ fieldset {
   }
 }
 @media (prefers-reduced-motion: no-preference) {
+  .transcript-card.summarizing {
+    animation: summary-glow 1.4s ease-in-out infinite alternate;
+  }
+  @keyframes summary-glow {
+    to {
+      box-shadow: 0 0 24px #759c6b66;
+    }
+  }
   button {
     transition:
       background 0.15s,

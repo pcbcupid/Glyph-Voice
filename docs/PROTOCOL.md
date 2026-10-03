@@ -5,7 +5,8 @@ This project defines the contract implemented by the app and the included
 PCB Cupid firmware. Replace `WebSocketAudioReceiver` if an existing contract differs.
 
 Phone: WebSocket client. Glyph: WebSocket server at `ws://<local-ip>:8080/audio`.
-Automatic discovery uses the fixed port/path and UDP advertisement described below.
+Current transport-r11 uses manual IP entry; no Bluetooth or UDP discovery is active.
+Personal hotspot naming and GPIO14 LED status do not change this audio protocol.
 The audio socket has no subprotocol or application authentication. The board never
 connects to a cloud model or the phone microphone. Remote stop is an optional,
 explicitly advertised extension (transport-r5+ / app0.10.0+).
@@ -24,7 +25,7 @@ Use a fresh ID per press. Rates accepted: 8000, 16000, 32000, 44100, 48000. Chan
 count must be 1. Samples must be signed 16-bit two's-complement, little-endian.
 No WAV/RIFF headers, sequence headers, compression, or base64 encoding.
 
-The included firmware (transport-r6) uses `sampleRate:16000`, with 640-byte / 20 ms
+The current source firmware uses `sampleRate:16000`, with 1280-byte / 40 ms
 audio messages (a shorter aligned final tail is allowed). It captures 48 kHz I2S
 and low-pass filters/downsamples to 16 kHz before sending; metadata describes the
 actual transmitted PCM, not the raw I2S clock. Older r2/r3 firmware sent 48 kHz PCM.
@@ -35,14 +36,18 @@ not guessed. One second's end byte count is 32000 at 16 kHz (96000 at 48 kHz).
 ## While recording (button need not be held)
 
 Send binary WebSocket **messages**, each containing 2–16384 bytes and an even number
-of bytes. Recommended: 640 bytes = 20 ms at 16 kHz. Send audio continuously,
+of bytes. The current firmware sends 1280 bytes = 40 ms at 16 kHz; older 640-byte /
+20 ms messages remain valid without an app change. Send audio continuously,
 including silence. WebSocket fragmentation is allowed, but each assembled message
 must satisfy this limit. Sample rate and format cannot change during a recording.
 
-There is no configured recording-duration limit or start-to-end deadline. The phone
-still interrupts a recording if no audio packets arrive for 5 seconds. Silence must
-be sent as PCM too: this timeout detects a stalled stream, not a quiet speaker.
-It does not treat a lost connection as a valid end-of-recording signal.
+There is no configured recording-duration limit or start-to-end deadline. Android
+and web show a **Waiting for Glyph audio** warning after 5 seconds without PCM,
+but keep the socket, recording ID, words and stop control alive. The next PCM
+packet clears the warning. Silence must still be sent as PCM: quiet speech is not
+an end condition. Actual socket/heartbeat failures remain errors; a lost connection
+is never treated as a valid end-of-recording signal. Browser foreground restrictions
+and bounded resource safeguards still apply.
 
 ## Second button click (stop)
 
@@ -79,8 +84,8 @@ normal matching `end` with the exact byte count. That `end` is the acknowledgmen
 the app does not stop consuming audio or finalize STT merely because STOP was sent.
 
 After 5 seconds without acknowledgment, the phone offers a stop retry but does not
-fabricate an end frame or silently discard speech. Existing audio inactivity rules
-still apply. Older firmware without `control` continues to support BOOT stop; the
+fabricate an end frame or silently discard speech. A quiet but connected stream
+is not forcibly ended. Older firmware without `control` continues to support BOOT stop; the
 app does not send it unsupported commands. Both app and firmware should be updated
 for phone-stop support. This is a trusted-LAN protocol, not authenticated control.
 
@@ -92,8 +97,8 @@ not trigger uploads. Cloud summaries require internet; STT does not.
 ## Failure and reconnect
 
 Binary before start, nested start, unknown control type, invalid format/rate,
-wrong end ID, byte-count mismatch, oversized/unaligned packet, timeout, or duration
-overflow abort the session and reconnect. A transport failure discards incomplete
+wrong end ID, byte-count mismatch, oversized/unaligned packet, connection/heartbeat
+failure, or byte-counter overflow abort the session and reconnect. A transport failure discards incomplete
 audio but **retains the latest partial transcript**, checkpointed locally and marked
 Interrupted. Reconnect never clears the textbox. A complete
 segment already undergoing finalization can finish while transport
@@ -106,7 +111,10 @@ screen-off leaves the foreground connection service running. There is no
 DNS or automatic host scan. Private IPv4 endpoints only; OS routing is used for a
 phone-hosted hotspot, Wi-Fi-specific sockets for a matching upstream Wi-Fi route.
 
-## Automatic discovery (transport-r6)
+## Historical automatic discovery (transport-r6/r7 only)
+
+Removed in transport-r8 and current apps. The legacy wire format below is retained
+for older firmware reference, not as an active connection path.
 
 While joined to a phone hotspot, the board sends a UTF-8 UDP datagram once per
 second to its DHCP gateway (the phone), port 40123, from port 40124:

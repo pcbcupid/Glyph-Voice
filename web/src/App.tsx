@@ -4,19 +4,15 @@ import type { Runtime } from './Runtime';
 import type { Conversation, Summary } from './core/types';
 import { Icon } from './ui/Icon';
 import { Modal } from './ui/Modal';
-import { GlyphSetup } from './ui/GlyphSetup';
 import { LocalSettings } from './ui/LocalSettings';
 import type { LocalConfig } from './speech/LocalRecognizer';
+import { localEndpoint } from './core/protocol';
+import { SummarySettings } from './ui/SummarySettings';
+import { UpdateNotice } from './ui/UpdateNotice';
+import { SummaryStatus } from './ui/SummaryStatus';
 
 type Panel =
-  | 'conversations'
-  | 'summaries'
-  | 'connect'
-  | 'speech'
-  | 'about'
-  | 'summary-info'
-  | 'glyph-setup'
-  | null;
+  'conversations' | 'summaries' | 'connect' | 'speech' | 'about' | 'summary-settings' | null;
 export function App({ runtime }: { runtime: Runtime }) {
   const state = useSyncExternalStore(runtime.subscribe, runtime.getSnapshot);
   const [panel, setPanel] = useState<Panel>(null);
@@ -24,9 +20,17 @@ export function App({ runtime }: { runtime: Runtime }) {
   const [original, setOriginal] = useState(false);
   const [deletedCurrent, setDeletedCurrent] = useState('');
   const [message, setMessage] = useState('');
-  const [address, setAddress] = useState('');
-  const bleAddress = useRef('');
-  const [awake, setAwake] = useState(false);
+  const [address, setAddress] = useState(() => {
+    try {
+      const saved = localStorage.getItem('glyph.lastAddress') ?? '';
+      if (saved) localEndpoint(saved, 'http:');
+      return saved;
+    } catch {
+      return '';
+    } // An optional preference must not block connection.
+  });
+  const pendingAddress = useRef('');
+  const [awake, setAwake] = useState(true);
   const [wakeStatus, setWakeStatus] = useState('');
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
@@ -41,6 +45,28 @@ export function App({ runtime }: { runtime: Runtime }) {
           ? ''
           : (state.session.conversation?.text ?? '')));
   const viewingSummary = !!summary && !original;
+
+  useEffect(() => {
+    setMessage('');
+  }, [state.summaryBusy, state.session.conversation?.id]);
+
+  useEffect(() => {
+    if (state.summaryNeedsSetup) setPanel('summary-settings');
+  }, [state.summaryNeedsSetup]);
+  useEffect(() => {
+    const result = state.summaryResult;
+    if (
+      result &&
+      !busy &&
+      ((!selected && state.session.conversation?.id === result.sourceId) ||
+        selected?.id === result.sourceId ||
+        summary?.sourceId === result.sourceId)
+    ) {
+      setSelected(result);
+      setOriginal(false);
+      follow.current = true;
+    }
+  }, [state.summaryResult]);
 
   useEffect(() => {
     if (state.session.phase === 'receiving') {
@@ -105,6 +131,7 @@ export function App({ runtime }: { runtime: Runtime }) {
     };
   }, [awake, connected]);
   const close = () => {
+    if (panel === 'summary-settings') runtime.dismissSummarySetup();
     setPanel(null);
     setMessage('');
   };
@@ -149,7 +176,14 @@ export function App({ runtime }: { runtime: Runtime }) {
       setMessage(e instanceof Error ? e.message : 'Could not delete this entry.');
     }
   }
-  const title = viewingSummary ? 'Summarized' : original ? 'Original transcript' : 'Your words';
+  const title =
+    state.summaryBusy && !busy
+      ? 'Summarizing…'
+      : viewingSummary
+        ? 'Summarized'
+        : original
+          ? 'Original transcript'
+          : 'Your words';
   return (
     <>
       <header className="topbar">
@@ -208,18 +242,19 @@ export function App({ runtime }: { runtime: Runtime }) {
                     ? 'Connecting…'
                     : 'Reconnecting…'}
             </span>
+            {connected && <small> · {address}</small>}
           </div>
           <button
             className="quiet"
             disabled={state.loading}
-            onClick={() => (connected ? runtime.disconnect() : setPanel('glyph-setup'))}
+            onClick={() => (connected ? runtime.disconnect() : setPanel('connect'))}
           >
             {connected ? 'Disconnect' : 'Connect Glyph'}
             <Icon name="arrow" />
           </button>
         </section>
         <section
-          className={`transcript-card ${busy ? 'active' : ''}`}
+          className={`transcript-card ${busy ? 'active' : ''} ${state.summaryBusy ? 'summarizing' : ''}`}
           aria-labelledby="transcript-title"
         >
           <div className="card-head">
@@ -254,12 +289,18 @@ export function App({ runtime }: { runtime: Runtime }) {
                 <span className="wave-tile">
                   <Icon name="wave" />
                 </span>
-                <h3>Make room for your next thought.</h3>
-                <p>
-                  Connect your Glyph. Click BOOT to speak,
-                  <br />
-                  then click again when you’re done.
-                </p>
+                <h3>{busy ? 'Receiving your words…' : 'Make room for your next thought.'}</h3>
+                {busy ? (
+                  <p>
+                    Audio is received from the start. First words appear when recognition is ready.
+                  </p>
+                ) : (
+                  <p>
+                    Connect your Glyph. Click BOOT to speak,
+                    <br />
+                    then click again when you’re done.
+                  </p>
+                )}
                 <small>
                   Choose a local model server or optional cloud speech.
                   <br />
@@ -280,24 +321,49 @@ export function App({ runtime }: { runtime: Runtime }) {
             <span>Saved in this browser</span>
           </div>
         </section>
+        <SummaryStatus
+          busy={state.summaryBusy}
+          message={state.summaryMessage}
+          error={state.summaryError}
+          settings={() => setPanel('summary-settings')}
+        />
         <div className="actions">
           <button className="secondary" disabled={!text} onClick={() => void copy()}>
             <Icon name="copy" />
             Copy
           </button>
-          {state.session.phase === 'receiving' ? (
+          {state.session.phase === 'receiving' && (
             <button className="primary" disabled={state.stopping} onClick={() => runtime.stop()}>
               {state.stopping ? 'Waiting for Glyph…' : 'Stop recording'}
               <Icon name="wave" />
             </button>
+          )}
+          {state.summaryBusy ? (
+            <button className="secondary" onClick={() => runtime.cancelSummary()}>
+              Cancel summary
+            </button>
           ) : (
             <button
               className="primary"
-              disabled={!text || busy}
-              onClick={() => setPanel('summary-info')}
+              disabled={(!text && !busy) || state.session.phase === 'processing'}
+              onClick={() => {
+                setMessage('');
+                runtime.requestSummary(
+                  busy
+                    ? undefined
+                    : summary
+                      ? {
+                          id: summary.sourceId,
+                          text: summary.source,
+                          created: summary.created,
+                          status: 'complete',
+                        }
+                      : ((selected as Conversation | undefined) ?? undefined),
+                );
+              }}
             >
               <Icon name="summary" />
-              Summarize
+              {state.session.phase === 'receiving' ? 'Stop & summarize' : 'Summarize'}
             </button>
           )}
         </div>
@@ -318,7 +384,11 @@ export function App({ runtime }: { runtime: Runtime }) {
           </button>
         )}
         <p className="feedback" role="status">
-          {message || state.storageError || state.notice || state.session.message}
+          {message ||
+            state.storageError ||
+            (state.session.phase === 'receiving' && !state.stopping
+              ? state.session.message
+              : state.notice || state.session.message)}
         </p>
         <aside className="foreground-note">
           <span className="note-title">Keep this page open while recording.</span> Switching apps or
@@ -330,6 +400,7 @@ export function App({ runtime }: { runtime: Runtime }) {
           </label>
           {wakeStatus && <small>{wakeStatus}</small>}
         </aside>
+        <UpdateNotice blocked={connected || busy || state.summaryBusy || state.loading} />
         <footer>
           <span>GLYPH C6 → Wi-Fi → your browser</span>
           <button className="text-button" onClick={() => setPanel('about')}>
@@ -356,7 +427,7 @@ export function App({ runtime }: { runtime: Runtime }) {
                 <small>
                   {panel === 'conversations'
                     ? 'Saved transcripts will appear after you speak.'
-                    : 'AI summary generation is not connected in this first web slice.'}
+                    : 'English summaries appear here after you connect your API and summarize.'}
                 </small>
               </div>
             ) : (
@@ -405,10 +476,19 @@ export function App({ runtime }: { runtime: Runtime }) {
                   </span>
                   <Icon name="arrow" />
                 </button>
-                <button className="drawer-action" onClick={() => setPanel('summary-info')}>
+                <button
+                  className="drawer-action"
+                  disabled={state.summaryBusy}
+                  onClick={() => setPanel('summary-settings')}
+                >
                   <Icon name="summary" />
                   <span>
-                    Connect your API<small>Summary migration · coming next</small>
+                    Connect your API
+                    <small>
+                      {state.summaryConfigured
+                        ? 'Configured for this tab'
+                        : 'DeepSeek or OpenAI · text summaries'}
+                    </small>
                   </span>
                   <Icon name="arrow" />
                 </button>
@@ -424,45 +504,27 @@ export function App({ runtime }: { runtime: Runtime }) {
           </div>
         </Modal>
       )}
-      {panel === 'glyph-setup' && (
-        <GlyphSetup
-          close={close}
-          manual={() => {
-            bleAddress.current = '';
-            setPanel(state.configured ? 'connect' : 'speech');
-          }}
-          connected={(endpoint) => {
-            setAddress(endpoint);
-            bleAddress.current = endpoint;
-            if (location.protocol === 'https:' && !state.serverBridge) {
-              close();
-              setMessage(
-                `Glyph joined Wi-Fi at ${endpoint}. Configure a local model server with --glyph-host to bridge HTTPS audio.`,
-              );
-            } else if (!state.configured) setPanel('speech');
-            else
-              attempt(() => {
-                runtime.connect(endpoint);
-                close();
-              });
-          }}
-        />
-      )}
       {panel === 'connect' && (
         <Modal title="Connect your Glyph" close={close}>
-          <p>
-            Use the same local network as the board. Browser UDP discovery is unavailable; enter the
-            address printed in its serial monitor.
-          </p>
-          <p className="callout">
-            {state.serverBridge
-              ? 'Your self-hosted server bridges audio from the permitted board IP. It must be on the board’s network.'
-              : 'Direct connection uses plain WebSocket on a trusted LAN. For HTTPS, configure local speech with the server’s --glyph-host bridge.'}
-          </p>
+          <p className="connection-intro">Your board. Your IP. No pairing.</p>
           <form
             onSubmit={(event) => {
               event.preventDefault();
               attempt(() => {
+                localEndpoint(
+                  address,
+                  !state.configured || state.serverBridge ? 'http:' : location.protocol,
+                );
+                try {
+                  localStorage.setItem('glyph.lastAddress', address.trim());
+                } catch {
+                  /* Remembering the IP is optional; no credentials are stored. */
+                }
+                if (!state.configured) {
+                  pendingAddress.current = address.trim();
+                  setPanel('speech');
+                  return;
+                }
                 runtime.connect(address);
                 close();
               });
@@ -472,19 +534,94 @@ export function App({ runtime }: { runtime: Runtime }) {
               Glyph address
               <input
                 autoFocus
-                inputMode="decimal"
+                inputMode="url"
                 autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                maxLength={21}
+                aria-describedby="glyph-address-help"
                 placeholder="192.168.43.42:8080"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 required
               />
             </label>
+            <p id="glyph-address-help" className="connection-hint">
+              Copy the [ready] IP from Serial Monitor (115200 baud), optionally with :8080. This
+              browser remembers your last entry; update it if the board’s IP changes.
+            </p>
             <p role="alert">{message}</p>
             <button className="primary" type="submit">
-              Connect
+              {state.configured ? 'Connect' : 'Next: speech recognition'}
             </button>
           </form>
+          <ol className="connection-steps">
+            <li>
+              <strong>Same Wi-Fi</strong>
+              <span>Join the network your Glyph uses, or the phone hotspot hosting it.</span>
+            </li>
+            <li>
+              <strong>Your board’s address</strong>
+              <span>
+                Use its recording IP, not the setup-page IP or another participant’s board.
+              </span>
+            </li>
+            <li>
+              <strong>Connect, then speak</strong>
+              <span>
+                Wait for “Glyph connected”, then click BOOT once to start and again to stop.
+              </span>
+            </li>
+          </ol>
+          <p className="callout">
+            One board, one app at a time. Disconnect the Android app or any other browser using this
+            Glyph. Your local model runs on the computer hosting your server—not on the board.
+          </p>
+          <details className="callout">
+            <summary>First-time Wi-Fi setup / workshop</summary>
+            <ol>
+              <li>
+                Open your board’s write-capable USB serial monitor at 115200 baud. Match the GLYPH suffix printed there to
+                your board—not another participant’s.
+              </li>
+              <li>
+                Reset with BOOT released, then tap BOOT during the first 3-second countdown.
+                Type a board hotspot label and password in serial when prompted (transport-r11).
+                Join the printed GLYPH-name-suffix network using that password, then open
+                http://192.168.4.1 to enter your router’s 2.4 GHz Wi-Fi details. First-time boards
+                enter setup automatically. Older firmware may use GLYPH-Setup / glyphvoice instead.
+              </li>
+              <li>
+                Return to that Wi-Fi and copy the new address from the serial monitor here. The
+                setup address 192.168.4.1 is not normally the recording address.
+              </li>
+              <li>
+                Disconnect the Android app first. Use one board and one local model server per
+                participant/computer. Shared Wi-Fi must allow devices to reach each other.
+              </li>
+            </ol>
+            <p>
+              Already configured? Just use its current IP. No Bluetooth permission, discovery or
+              pairing PIN is needed. Leave BOOT released during startup to use the saved Wi-Fi.
+            </p>
+            <p>
+              Label each board with its GLYPH suffix. IPs can change after reconnecting; use the
+              latest serial output. Only connect on a trusted workshop network.
+            </p>
+          </details>
+          <details className="callout">
+            <summary>Connection troubleshooting</summary>
+            <p>
+              Use your own board’s latest IP, not 192.168.4.1 from Wi-Fi setup. Keep the board near
+              the router/hotspot. Guest Wi-Fi or client isolation can block communication even when
+              both devices are on the same network.
+            </p>
+            <p>
+              {state.serverBridge
+                ? 'Your local server must reach the board, and the IP must match its --glyph-host launch option.'
+                : 'For a workshop on this computer, use the localhost page opened by start-web. An HTTPS page requires the local server’s --glyph-host bridge to reach a plain WebSocket board.'}
+            </p>
+          </details>
         </Modal>
       )}
       {panel === 'speech' && (
@@ -494,10 +631,10 @@ export function App({ runtime }: { runtime: Runtime }) {
             disabled={connected || busy}
             save={(config) => {
               runtime.configure(config);
-              if (bleAddress.current && location.protocol === 'http:')
+              if (pendingAddress.current && location.protocol === 'http:')
                 attempt(() => {
-                  runtime.connect(bleAddress.current);
-                  bleAddress.current = '';
+                  runtime.connect(pendingAddress.current);
+                  pendingAddress.current = '';
                   close();
                 });
               else setPanel('connect');
@@ -508,10 +645,10 @@ export function App({ runtime }: { runtime: Runtime }) {
             }}
             saveLocal={(config) => {
               runtime.configureLocal(config);
-              if (bleAddress.current && (config.bridge || location.protocol === 'http:'))
+              if (pendingAddress.current && (config.bridge || location.protocol === 'http:'))
                 attempt(() => {
-                  runtime.connect(bleAddress.current);
-                  bleAddress.current = '';
+                  runtime.connect(pendingAddress.current);
+                  pendingAddress.current = '';
                   close();
                 });
               else setPanel('connect');
@@ -519,19 +656,20 @@ export function App({ runtime }: { runtime: Runtime }) {
           />
         </Modal>
       )}
-      {panel === 'summary-info' && (
-        <Modal title="AI summaries · next milestone" close={close}>
-          <p>
-            The Android app’s summary workflow is not wired into this first web slice yet. Your
-            transcript remains available to copy and read.
-          </p>
-          <p>
-            Provider CORS, browser credential handling, automatic summaries and cancel/delete races
-            need a dedicated port. No text has been sent and no API key is requested here.
-          </p>
-          <button className="secondary" onClick={close}>
-            Back to my words
-          </button>
+      {panel === 'summary-settings' && (
+        <Modal title="Connect your API" close={close}>
+          <SummarySettings
+            connection={runtime.getSummaryConnection()}
+            configured={state.summaryConfigured}
+            save={(config) => {
+              runtime.configureSummary(config);
+              close();
+            }}
+            forget={() => {
+              runtime.forgetSummary();
+              close();
+            }}
+          />
         </Modal>
       )}
       {panel === 'about' && (
@@ -547,8 +685,9 @@ export function App({ runtime }: { runtime: Runtime }) {
             </li>
             <li>Keys live in this tab’s memory, not browser storage. Refreshing clears them.</li>
             <li>
-              Phone-only browser inference and AI summaries are not ported yet. The optional local
-              bridge supports same-origin audio behind your HTTPS reverse proxy.
+              Phone-only browser inference is not ported yet. AI summaries send text to your chosen
+              provider through the local server. The optional local bridge supports same-origin
+              audio behind your HTTPS reverse proxy.
             </li>
             <li>The installable app shell can load offline; cloud transcription cannot.</li>
             <li>History is not synced with the Android app. Browsers may evict site storage.</li>

@@ -1,5 +1,9 @@
 # Automatic AI summaries on stop
 
+This page describes the **native Android** workflow. The React web app now also
+supports text summaries, with tab-only keys and a self-hosted relay; its limits
+and foreground-only behavior are documented in [Web AI summaries](../web/README.md#ai-summaries).
+
 Local transcription uses Parakeet on the phone. Optional cloud speech-to-text is
 configured separately in [Speech recognition settings](../kit/APP.md#optional-cloud-transcription)
 and sends audio to that endpoint. Summary requests themselves send text only.
@@ -54,6 +58,12 @@ in-flight request. There is a foreground status notification and Cancel summary
 button. Cancelling cannot retract text already delivered or guarantee no API charge.
 Force-stop/process death marks unfinished stored requests interrupted on next launch;
 retry is manual, never automatic. Device/OEM power restrictions still apply.
+
+Android shows summary progress, elapsed seconds and errors below the main text box,
+as well as in the summary drawer. A response that cannot be saved stays available
+to copy with an explicit **Not saved** warning. Cancellation invalidates late UI
+results even after the network response arrived; it does not erase an older cached
+successful summary. Keys and raw text are not included in progress/error logs.
 
 Completion events are tracked separately from latest-only UI state, so returning
 to the app cannot retrigger uploads or lose a clean-stop event. Pending automatic

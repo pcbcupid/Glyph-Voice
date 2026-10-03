@@ -5,7 +5,6 @@ import asyncio
 import json
 import uuid
 import wave
-import socket
 
 from websockets.asyncio.server import serve
 
@@ -54,31 +53,18 @@ async def stream(connection, rate, pcm, mode):
     await connection.wait_closed()
 
 
-async def announce(phone_ip):
-    message = json.dumps(dict(service="glyph-voice", version=1, id="020000000001",
-                              port=8080, path="/audio")).encode()
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
-        udp.setblocking(False)
-        while True:
-            await asyncio.get_running_loop().sock_sendto(udp, message, (phone_ip, 40123))
-            await asyncio.sleep(1)
-
-
 async def main(args):
     rate, pcm = load_wav(args.wav)
     async with serve(lambda connection: stream(connection, rate, pcm, args.mode),
                      args.host, args.port, max_size=2048, ping_interval=10):
         print(f"Listening on {args.host}:{args.port}/audio; {len(pcm)/(rate*2):.2f}s at {rate} Hz", flush=True)
-        print("Tap Find Glyph on the phone hosting this computer's Wi-Fi hotspot.", flush=True)
-        if args.port != 8080:
-            raise ValueError("Automatic discovery uses port 8080")
-        await announce(args.phone_ip)
+        print(f"Connect Glyph -> enter this computer's private LAN IPv4 address with :{args.port}. Do not enter 0.0.0.0.", flush=True)
+        await asyncio.Future()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wav")
-    parser.add_argument("--phone-ip", required=True, help="Hotspot phone gateway IPv4; only this developer simulator needs it")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--mode", choices=("normal", "empty", "malformed", "disconnect", "bad-count"), default="normal")

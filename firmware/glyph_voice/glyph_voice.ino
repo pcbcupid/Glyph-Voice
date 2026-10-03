@@ -5,12 +5,12 @@
 #include "I2SMicrophone.h"
 #include "config.h"
 #include "StopCommand.h"
-#include <WiFiUdp.h>
 #include "WifiSetup.h"
+#include "BootSetupWindow.h"
+#include "SerialCommands.h"
+#include "StatusLed.h"
 
 WifiSetup wifiSetup;
-WiFiUDP discovery;
-uint32_t lastAnnouncement = 0;
 
 #if !CONFIG_IDF_TARGET_ESP32C6
 #error "Select Pcbcupid GLYPH C6 (ESP32-C6), not ESP32/C3/S3."
@@ -20,15 +20,19 @@ uint32_t lastAnnouncement = 0;
 #endif
 
 enum class PacketKind : uint8_t { Start, Audio, End };
+enum class StopOrigin : uint8_t { None, Boot, App };
 enum class CaptureFault : uint32_t { None, QueueFull, DmaOverrun, ReadError };
 struct Packet {
   uint32_t epoch;
   uint32_t recording;
   PacketKind kind;
+  StopOrigin stoppedBy;
   uint16_t bytes;
   // WebSockets can prepend its header here: no malloc/memcpy for every send.
   uint8_t frame[WEBSOCKETS_MAX_HEADER_SIZE + Config::FRAMES_PER_PACKET * 2];
 };
+// Keep the enlarged queue bounded; leave room for I2S, Wi-Fi/TCP and task stacks.
+static_assert(sizeof(Packet) * Config::QUEUE_PACKETS <= 170 * 1024, "Audio queue RAM budget exceeded");
 
 I2SMicrophone microphone;
 WebSocketsServer socketServer(Config::PORT, "", "");
@@ -42,6 +46,7 @@ std::atomic<CaptureFault> captureFault{CaptureFault::None};
 std::atomic<uint32_t> readError{ESP_OK};
 std::atomic<uint32_t> queueHighWater{0};
 std::atomic<uint32_t> maxCaptureGapMs{0};
+std::atomic<uint32_t> recordingDmaBaseline{0};
 uint32_t epochCounter = 0;
 int phone = -1;
 uint32_t sendingRecording = 0;
@@ -49,9 +54,82 @@ uint64_t sentBytes = 0; // Session totals must not wrap during long recordings.
 bool initialized = false;
 bool wifiConnected = false;
 bool microphoneFailureReported = false;
-bool closeBluetooth = false;
 uint32_t lastWifiAttempt = 0;
 uint32_t maxSendMs = 0;
+uint32_t lastStreamReport = 0;
+uint32_t slowSends = 0;
+uint32_t lastSlowSendReport = 0;
+constexpr char FIRMWARE_LABEL[] = "GLYPH VOICE transport-r11: personal hotspot + GPIO14 Wi-Fi LED; no Bluetooth; 40ms audio / 128-slot queue";
+SerialCommands serialCommands;
+void updateStatusLed() {
+  const bool connected = WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
+  const bool on = statusLedOn(millis(), connected);
+  digitalWrite(Config::STATUS_LED, on == Config::STATUS_LED_ACTIVE_HIGH ? HIGH : LOW);
+}
+
+void printSerialHelp() {
+  Serial.println("[console] USB Serial Monitor: 115200 baud. Send a command with Enter / Newline (CR, LF or CRLF)");
+  Serial.println("[console] HELP       - show these instructions");
+  Serial.println("[console] STATUS     - show board ID, Wi-Fi/setup state, recording address and audio state");
+  Serial.println("[console] WIFI SETUP - choose a board hotspot name/password, then open setup (disconnect Android/web first)");
+  Serial.println("[console] Or reset with BOOT released: tap BOOT during 3...2...1 for setup; do nothing to use saved Wi-Fi");
+  Serial.println("[console] BOOT held across reset enters the FLASHING bootloader, not Wi-Fi setup. Router passwords go in the setup web page only");
+}
+
+void printSerialStatus() {
+  Serial.printf("[firmware] %s\n", FIRMWARE_LABEL);
+  wifiSetup.printStatus();
+  Serial.printf("[audio] hardware=%s | app=%s | stream=%s | sent=%llu bytes | heap=%u minHeap=%u\n",
+                initialized && !microphoneFailed.load() ? "ready" : "not ready; check fatal logs",
+                phone >= 0 ? "connected" : "not connected",
+                sendingRecording ? "recording" : "idle",
+                static_cast<unsigned long long>(sentBytes), ESP.getFreeHeap(), ESP.getMinFreeHeap());
+}
+
+void pollSerialConsole() {
+  static bool wasConnected = false;
+  const bool connected = static_cast<bool>(Serial);
+  if (!connected) {
+    wasConnected = false;
+    serialCommands.clear();
+    wifiSetup.serialDisconnected();
+    return;
+  }
+  if (!wasConnected) {
+    wasConnected = true;
+    // Browser monitors often open AFTER the boot countdown. No reset or waiting
+    // for USB is needed to recover the setup URL / current recording address.
+    Serial.println("[console] USB monitor attached. No need to reset: send HELP, STATUS or WIFI SETUP + Enter");
+    if (!sendingRecording) printSerialStatus();
+  }
+  // Never use readStringUntil/delay/while(!Serial): live capture must keep running.
+  for (unsigned i = 0; i < 32 && Serial.available(); ++i) {
+    const char value = static_cast<char>(Serial.read());
+    if (wifiSetup.needsSerial()) { wifiSetup.serialByte(value); continue; }
+    // A setup-password CRLF may leave its LF after the wizard finishes. The
+    // normal command parser treats an empty newline as a harmless no-op.
+    const auto command = serialCommands.feed(value);
+    if (command == SerialCommands::None) continue;
+    switch (command) {
+      case SerialCommands::Help: printSerialHelp(); break;
+      case SerialCommands::Status: printSerialStatus(); break;
+      case SerialCommands::WifiSetup:
+        if (phone >= 0 || connectedEpoch.load() != 0 || sendingRecording) {
+          Serial.println("[setup] Not changing Wi-Fi: an app is connected. Stop recording, Disconnect Glyph in Android/web, then send WIFI SETUP again");
+        } else if (wifiSetup.busy()) {
+          wifiSetup.printStatus();
+        } else {
+          Serial.println("[setup] USB requested configuration. Saved Wi-Fi is kept until new settings connect successfully");
+          socketServer.close();
+          wifiConnected = false;
+          wifiSetup.openFromSerial(value);
+        }
+        break;
+      default: Serial.println("[console] Unknown/too-long command. Send HELP + Enter. Input is never echoed; enter Wi-Fi passwords in the setup page only"); break;
+    }
+    break; // One response per loop, with audio/socket work in between.
+  }
+}
 
 void abortCapture(uint32_t epoch, CaptureFault reason) {
   // Publish the reason before the epoch; the network task is the sole log writer.
@@ -69,7 +147,8 @@ bool enqueuePacket(const Packet& packet) {
   return false;
 }
 
-bool finishRecording(Packet& packet) {
+bool finishRecording(Packet& packet, StopOrigin origin) {
+  packet.stoppedBy = origin;
   // Flush a short final block BEFORE end. Never lose the final 10 ms of speech.
   if (packet.bytes) {
     packet.kind = PacketKind::Audio;
@@ -131,7 +210,7 @@ void captureTask(void*) {
     }
     const bool remoteStopped = healthy && recording && requestedStop.load() == packet.recording;
     if (remoteStopped) {
-      finishRecording(packet);
+      finishRecording(packet, StopOrigin::App);
       recording = false;
       armed = false;
     }
@@ -139,18 +218,20 @@ void captureTask(void*) {
     if (!remoteStopped && healthy && armed && clicked && millis() - settledAt >= Config::MIC_SETTLE_MS) {
       armed = false;
       if (recording) {
-        finishRecording(packet);
+        finishRecording(packet, StopOrigin::Boot);
         recording = false;
       } else {
         packet.epoch = epoch;
         if (++sequence == 0) ++sequence;
         packet.recording = sequence;
         packet.kind = PacketKind::Start;
+        packet.stoppedBy = StopOrigin::None;
         packet.bytes = 0;
         queueHighWater.store(0);
         maxCaptureGapMs.store(0);
         previousReadAt = millis();
         overrunCount = microphone.overruns();
+        recordingDmaBaseline.store(overrunCount);
         recording = enqueuePacket(packet);
       }
     }
@@ -219,7 +300,6 @@ void socketEvent(uint8_t client, WStype_t type, uint8_t* payload, size_t length)
       return;
     }
     phone = client;
-    closeBluetooth = true;
     if (++epochCounter == 0) ++epochCounter;
     connectedEpoch.store(epochCounter);
     Serial.println("[network] Phone connected; click BOOT to start, click again to stop");
@@ -245,10 +325,13 @@ bool sendPacket(Packet& packet) {
     sendingRecording = packet.recording;
     sentBytes = 0;
     maxSendMs = 0;
+    slowSends = 0;
+    lastSlowSendReport = 0;
+    lastStreamReport = millis();
     snprintf(message, sizeof(message),
              "{\"type\":\"start\",\"version\":1,\"id\":\"r%lu\",\"sampleRate\":%lu,\"channels\":1,\"encoding\":\"pcm_s16le\",\"control\":\"stop-v1\"}",
              static_cast<unsigned long>(packet.recording), static_cast<unsigned long>(Config::SAMPLE_RATE));
-    Serial.println("[audio] Live audio streaming; phone displays partial words");
+    Serial.println("[audio] Live audio streaming; no duration limit. BOOT or app STOP ends recording.");
     return socketServer.sendTXT(phone, message);
   }
   if (sendingRecording != packet.recording) return false;
@@ -260,25 +343,60 @@ bool sendPacket(Packet& packet) {
   snprintf(message, sizeof(message), "{\"type\":\"end\",\"id\":\"r%lu\",\"bytes\":%llu}",
            static_cast<unsigned long>(packet.recording), static_cast<unsigned long long>(sentBytes));
   const bool sent = socketServer.sendTXT(phone, message);
+  Serial.printf("[audio] Stop requested by %s\n", packet.stoppedBy == StopOrigin::Boot ? "BOOT button" : "app STOP command");
   Serial.printf("[audio] Stream ended: %llu bytes, %llu ms; phone finalizing last words\n",
                 static_cast<unsigned long long>(sentBytes),
                 static_cast<unsigned long long>(sentBytes * 1000ULL / (Config::SAMPLE_RATE * 2)));
   sendingRecording = 0;
-  Serial.printf("[stats] queuePeak=%lu/%u maxSend=%lu ms maxCaptureGap=%lu ms heap=%u minHeap=%u\n",
+  Serial.printf("[stats] queuePeak=%lu/%u maxSend=%lu ms maxCaptureGap=%lu ms slowSends=%lu heap=%u minHeap=%u\n",
                 static_cast<unsigned long>(queueHighWater.load()), Config::QUEUE_PACKETS,
                 static_cast<unsigned long>(maxSendMs), static_cast<unsigned long>(maxCaptureGapMs.load()),
+                static_cast<unsigned long>(slowSends),
                 ESP.getFreeHeap(), ESP.getMinFreeHeap());
   return sent;
 }
 
+bool chooseWifiSetupAtBoot() {
+  const uint32_t began = millis();
+  BootSetupWindow window(began, digitalRead(Config::RECORD_BUTTON) == LOW);
+  unsigned lastSeconds = 0;
+  while (true) {
+    const uint32_t now = millis();
+    updateStatusLed();
+    const auto choice = window.update(now, digitalRead(Config::RECORD_BUTTON) == LOW);
+    if (choice == BootSetupWindow::ConfigureWifi) {
+      Serial.println("[boot] BOOT selected Wi-Fi setup. Release the button; continue in USB Serial Monitor...");
+      return true;
+    }
+    if (choice == BootSetupWindow::SavedWifi) {
+      Serial.println("[boot] Startup window complete; using latest saved Wi-Fi (setup if none saved)");
+      return false;
+    }
+    const unsigned seconds = (BootSetupWindow::WINDOW_MS - (now - began) + 999) / 1000;
+    if (seconds != lastSeconds) {
+      lastSeconds = seconds;
+      Serial.printf("[boot] %u... Tap BOOT now for Wi-Fi setup, or wait for saved Wi-Fi\n", seconds);
+    }
+    delay(5);
+  }
+}
+
 void setup() {
   Serial.begin(115200);  // Native USB only. Never start Serial0 on microphone pins.
-  Serial.setTxBufferSize(2048); // Room for status bursts; never wait for a USB reader.
+  Serial.setTxBufferSize(4096); // Room for setup instructions; never wait for a USB reader.
   // CDC's default write timeout can stall the sender longer than the audio queue.
   // Prefer dropping diagnostic output when USB is congested to blocking speech.
   Serial.setTxTimeoutMs(0);
-  Serial.println("[firmware] GLYPH VOICE 0.12.0 transport-r7: authenticated BLE Wi-Fi setup and discovery");
+  Serial.printf("[firmware] %s\n", FIRMWARE_LABEL);
+  Serial.println("[boot] Reset with BOOT released. Tap BOOT during the next THREE seconds for a new Wi-Fi configuration hotspot");
+  Serial.println("[boot] Do nothing to join saved Wi-Fi. No saved settings? Setup opens automatically. Send HELP later for USB/browser instructions");
   pinMode(Config::RECORD_BUTTON, INPUT_PULLUP);
+  pinMode(Config::STATUS_LED, OUTPUT);
+  updateStatusLed();
+  const bool configureWifi = chooseWifiSetupAtBoot();
+  // Setup remains reachable even if audio hardware initialization fails below.
+  wifiSetup.begin(configureWifi);
+  lastWifiAttempt = millis();
   audioQueue = xQueueCreate(Config::QUEUE_PACKETS, sizeof(Packet));
   if (!audioQueue) {
     Serial.println("[fatal] Could not allocate audio queue; reset board");
@@ -293,8 +411,6 @@ void setup() {
     Serial.println("[fatal] Could not start capture task; reset board");
     return;
   }
-  wifiSetup.begin();
-  lastWifiAttempt = millis();
   socketServer.onEvent(socketEvent);
   initialized = true;
   Serial.printf("[audio] %lu Hz, PCM16 mono; BOOT GPIO%d click start / click stop\n",
@@ -302,12 +418,14 @@ void setup() {
 }
 
 void loop() {
+  updateStatusLed();
+  pollSerialConsole();
+  wifiSetup.poll(phone < 0);
+  if (wifiSetup.configuring()) { delay(2); return; }
   if (!initialized) {
     delay(100);
     return;
   }
-  wifiSetup.poll(phone < 0);
-  if (wifiSetup.active) { delay(2); return; }
   if (microphoneFailed.load() && !microphoneFailureReported) {
     microphoneFailureReported = true;
     // Report hardware failures even when they happen before a phone connects.
@@ -317,14 +435,14 @@ void loop() {
   if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IPAddress(0, 0, 0, 0)) {
     if (wifiConnected) {
       wifiConnected = false;
-      dropPhone("Wi-Fi lost; recording stopped. Reconnecting to phone hotspot");
+      dropPhone("Wi-Fi lost; recording stopped. Reconnecting to saved Wi-Fi/router/hotspot");
       socketServer.close();
-      discovery.stop();
     }
     if (!wifiSetup.busy() && millis() - lastWifiAttempt >= 15000) {
       lastWifiAttempt = millis();
       WiFi.reconnect();
-      Serial.println("[network] Retrying hotspot connection");
+      Serial.printf("[network] Retrying saved Wi-Fi: %s. Check router/hotspot power, 2.4 GHz and range\n", WifiSetup::connectionState());
+      Serial.println("[network] Changed network/password? Send WIFI SETUP + Enter, or reset and TAP BOOT during the 3-second countdown. Saved settings have NOT been erased");
     }
     delay(10);
     return;
@@ -332,37 +450,31 @@ void loop() {
   if (!wifiConnected) {
     wifiConnected = true;
     socketServer.begin();
-    discovery.begin(40124);
-    Serial.printf("[ready] Tap Find Glyph in the app (diagnostic address %s:%u); BOOT starts/stops\n",
+    Serial.printf("[ready] YOUR BOARD: GLYPH-%s | ID=%s\n",
+                  wifiSetup.boardId.substring(6).c_str(), wifiSetup.boardId.c_str());
+    Serial.printf("[ready] ANDROID / WEB: Connect Glyph -> enter %s:%u (not the Wi-Fi setup address)\n",
                   WiFi.localIP().toString().c_str(), Config::PORT);
+    Serial.println("[ready] Wait for the app/model to be ready, then click BOOT to start/stop. One audio client per board.");
+    Serial.printf("[ready] Wi-Fi channel=%d RSSI=%d dBm. Keep app/computer and Glyph on the same network; guest/client isolation blocks connections\n", WiFi.channel(), WiFi.RSSI());
+    Serial.println("[ready] Setup hotspot is OFF. Need the address again? Send STATUS + Enter. To change networks, disconnect app then send WIFI SETUP");
     Serial.printf("[memory] queue=%u bytes DMA=%u bytes heap=%u minHeap=%u\n",
                   static_cast<unsigned>(sizeof(Packet) * Config::QUEUE_PACKETS),
                   Config::DMA_DESCRIPTORS * Config::CAPTURE_FRAMES * 8,
                   ESP.getFreeHeap(), ESP.getMinFreeHeap());
-  }
-  if (millis() - lastAnnouncement >= 1000) {
-    lastAnnouncement = millis();
-    char announcement[192];
-    snprintf(announcement, sizeof(announcement),
-             "{\"service\":\"glyph-voice\",\"version\":1,\"id\":\"%s\",\"port\":8080,\"path\":\"/audio\"}",
-             wifiSetup.boardId.c_str());
-    // On a phone hotspot, DHCP's gateway is the phone itself; no client list or multicast required.
-    if (discovery.beginPacket(WiFi.gatewayIP(), 40123)) {
-      discovery.write(reinterpret_cast<const uint8_t*>(announcement), strlen(announcement));
-      discovery.endPacket();
-    }
+    Serial.printf("[memory] Audio jitter capacity=%u ms (not a fixed delay). Longer stalls still require recovery; no audio is silently dropped\n",
+                  (Config::QUEUE_PACKETS - 2) * Config::FRAMES_PER_PACKET * 1000 / Config::SAMPLE_RATE);
   }
   socketServer.loop();
-  if (closeBluetooth) { closeBluetooth = false; wifiSetup.audioConnected(); }
   Packet packet;
   // A bounded batch prevents a busy audio queue starving socket housekeeping.
   for (unsigned i = 0; i < Config::SEND_BATCH_PACKETS; ++i) {
     const uint32_t epoch = connectedEpoch.load();
     if (epoch && (abortEpoch.load() == epoch || microphoneFailed.load())) {
-      Serial.printf("[fault] queue=%u/%u peak=%lu maxSend=%lu ms maxCaptureGap=%lu ms dmaOverruns=%lu RSSI=%d heap=%u minHeap=%u\n",
+      Serial.printf("[fault] queue=%u/%u peak=%lu maxSend=%lu ms maxCaptureGap=%lu ms dmaOverruns=%lu sessionDmaOverruns=%lu RSSI=%d heap=%u minHeap=%u\n",
                     static_cast<unsigned>(uxQueueMessagesWaiting(audioQueue)), Config::QUEUE_PACKETS,
                     static_cast<unsigned long>(queueHighWater.load()), static_cast<unsigned long>(maxSendMs),
                     static_cast<unsigned long>(maxCaptureGapMs.load()), static_cast<unsigned long>(microphone.overruns()),
+                    static_cast<unsigned long>(microphone.overruns() - recordingDmaBaseline.load()),
                     WiFi.RSSI(), ESP.getFreeHeap(), ESP.getMinFreeHeap());
       switch (captureFault.load()) {
         case CaptureFault::QueueFull:
@@ -380,7 +492,27 @@ void loop() {
     const bool sent = sendPacket(packet);
     const uint32_t sendMs = millis() - sendStarted;
     if (sendMs > maxSendMs) maxSendMs = sendMs;
+    if (sent && sendMs >= 200) {
+      ++slowSends;
+      if (slowSends == 1 || millis() - lastSlowSendReport >= 5000) {
+        lastSlowSendReport = millis();
+        const unsigned queued = uxQueueMessagesWaiting(audioQueue);
+        Serial.printf("[network] Slow send returned after %lu ms; queue=%u/%u (~%u ms) slowSends=%lu RSSI=%d heap=%u. Check receiver/router load; strong RSSI alone does not rule out stalls\n",
+                      static_cast<unsigned long>(sendMs), queued, Config::QUEUE_PACKETS,
+                      queued * Config::FRAMES_PER_PACKET * 1000 / Config::SAMPLE_RATE,
+                      static_cast<unsigned long>(slowSends), WiFi.RSSI(), ESP.getFreeHeap());
+      }
+    }
     if (!sent) dropPhone("Audio socket write failed; incomplete recording discarded");
+  }
+  if (sendingRecording && millis() - lastStreamReport >= 30000) {
+    lastStreamReport = millis();
+    Serial.printf("[stream] still sending r%lu audio=%llu s bytes=%llu queue=%u/%u maxSend=%lu ms RSSI=%d heap=%u\n",
+                  static_cast<unsigned long>(sendingRecording),
+                  static_cast<unsigned long long>(sentBytes / (Config::SAMPLE_RATE * 2)),
+                  static_cast<unsigned long long>(sentBytes),
+                  static_cast<unsigned>(uxQueueMessagesWaiting(audioQueue)), Config::QUEUE_PACKETS,
+                  static_cast<unsigned long>(maxSendMs), WiFi.RSSI(), ESP.getFreeHeap());
   }
   delay(1);
 }

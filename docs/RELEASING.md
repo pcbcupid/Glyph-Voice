@@ -33,6 +33,15 @@ Forks should generate their own keys and choose their own application ID.
 
 ## Artifacts
 
+**Workshop r11:** rebuild from the current revision; the existing v0.11.0 release
+does not automatically gain serial naming, GPIO14 status or web installers. The
+current local build is `.tools/firmware-workshop/glyph_voice.ino.merged.bin` with
+`SHA256SUMS` beside it. `.tools` is ignored: attach the merged image/checksum as
+release assets, not source commits. `tools/build_release.sh` currently names
+version 0.12.0 outputs; keep its version aligned with `app/build.gradle` and use a
+new release tag rather than overwriting historical binaries. The list below
+describes historical 0.11.0 names, not a newly published release.
+
 - `glyph-voice-0.11.0.apk`: signed Android release with bundled local model.
 - `glyph-voice-c6-0.11.0.bin`: merged C6 firmware, flash at 0x0.
 - `glyph-voice-c6-0.11.0-app.bin`: app-only image, flash at 0x10000 only with matching partitions.
@@ -45,6 +54,16 @@ private signing material, API keys, transcripts, recordings or machine-specific
 configuration. The model's separate license and notices remain inside the APK.
 
 ## Publish
+
+Include `installation/`, the start-web launchers/`start.sh`, current web/server
+source and `docs/WORKSHOP.md` in the source revision/ZIP. Do not include `.tools`,
+virtual environments, node_modules, private tokens or raw model caches in source.
+Publish the corresponding model attribution/license with redistributed model files.
+The website replacement is [docs/website/glyph-voice.mdx](website/glyph-voice.mdx),
+based on the existing [PCB Cupid kit guide](https://learn.pcbcupid.com/guides/kits/glyph-voice).
+Copy it to the documentation site's `guides/kits/glyph-voice.mdx` only **after**
+matching binaries/source are available; preview it in that site's MDX build.
+This repository change does not edit/publish the live website.
 
 After checks, commit the source and tag the same revision used to build artifacts.
 Use GitHub Releases or the GitHub CLI to attach the output files and release notes.

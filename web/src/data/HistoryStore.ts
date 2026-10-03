@@ -3,6 +3,7 @@ import type { Conversation, Summary } from '../core/types';
 export class HistoryStore {
   private opening?: Promise<IDBDatabase>;
   private deleted = new Set<string>();
+  private deletedSummaries = new Set<string>();
   private open() {
     return (this.opening ??= new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('glyph-voice-web', 1);
@@ -37,6 +38,16 @@ export class HistoryStore {
       if (!this.deleted.has(value.id)) table.put(value);
     });
   }
+  async saveSummary(value: Summary): Promise<boolean> {
+    let saved = false;
+    await this.mutate('summaries', (table) => {
+      if (!this.deleted.has(value.sourceId) && !this.deletedSummaries.has(value.id)) {
+        table.put(value);
+        saved = true;
+      }
+    });
+    return saved;
+  }
   async list<T extends Conversation | Summary>(table: 'conversations' | 'summaries'): Promise<T[]> {
     const db = await this.open();
     return new Promise((resolve, reject) => {
@@ -49,10 +60,12 @@ export class HistoryStore {
   }
   async delete(id: string, summary: boolean) {
     if (!summary) this.deleted.add(id);
+    else this.deletedSummaries.add(id);
     try {
       await this.mutate(summary ? 'summaries' : 'conversations', (table) => table.delete(id));
     } catch (e) {
       this.deleted.delete(id);
+      this.deletedSummaries.delete(id);
       throw e;
     }
   }

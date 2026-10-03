@@ -10,9 +10,63 @@ const metadata = JSON.stringify({
   encoding: 'pcm_s16le',
   control: 'stop-v1',
 });
+test('manual IP is the default, validates addresses and never opens Bluetooth', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'bluetooth', {
+      configurable: true,
+      value: {
+        requestDevice: () => {
+          throw new Error('Bluetooth must not be invoked');
+        },
+      },
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect Glyph' }).click();
+  await expect(page.getByRole('heading', { name: 'Connect your Glyph' })).toBeVisible();
+  await expect(page.getByLabel('Glyph address')).toBeVisible();
+  await expect(page.getByText('Your board. Your IP. No pairing.', { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /Bluetooth|Scan nearby|Choose nearby/i }),
+  ).toHaveCount(0);
+  await page.getByText('First-time Wi-Fi setup / workshop', { exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('not another participant');
+  await page.getByLabel('Glyph address').fill('8.8.8.8');
+  await page.getByRole('button', { name: 'Next: speech recognition' }).click();
+  await expect(page.getByRole('alert')).toContainText('private local-network');
+  await page.getByLabel('Glyph address').fill('192.168.4.2');
+  await page.getByRole('button', { name: 'Next: speech recognition' }).click();
+  await expect(page.getByRole('heading', { name: 'Speech recognition' })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Connect Glyph' }).click();
+  await expect(page.getByLabel('Glyph address')).toHaveValue('192.168.4.2');
+  await page.screenshot({
+    path: test.info().outputPath('manual-ip-connection.png'),
+    animations: 'disabled',
+  });
+});
+test('a corrupt remembered IP is ignored and blocked preference storage does not prevent setup', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('glyph.lastAddress', 'https://not-a-board.example');
+    Storage.prototype.setItem = () => {
+      throw new DOMException('Full', 'QuotaExceededError');
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect Glyph' }).click();
+  await expect(page.getByLabel('Glyph address')).toHaveValue('');
+  await page.getByLabel('Glyph address').fill('192.168.0.126:8080');
+  await page.getByRole('button', { name: 'Next: speech recognition' }).click();
+  await expect(page.getByRole('heading', { name: 'Speech recognition' })).toBeVisible();
+});
 async function configure(page: Page) {
   await page.getByRole('button', { name: 'Connect Glyph' }).click();
-  await page.getByRole('button', { name: 'Enter an existing Glyph IP' }).click();
+  await page.getByLabel('Glyph address').fill('192.168.4.2:8080');
+  await page.getByRole('button', { name: 'Next: speech recognition' }).click();
   await page.getByRole('button', { name: 'Cloud provider', exact: true }).click();
   await page
     .getByLabel('Full HTTPS transcription URL')
@@ -21,8 +75,6 @@ async function configure(page: Page) {
   await page.getByLabel('API key (optional, this tab only)').fill('test-key-not-real');
   await page.getByRole('checkbox', { name: /I choose cloud/ }).check();
   await page.getByRole('button', { name: 'Use cloud speech' }).click();
-  await page.getByLabel('Glyph address').fill('192.168.4.2:8080');
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
 }
 test('responsive empty screen, accessible drawers, and no default cloud transmission', async ({
   page,
@@ -89,7 +141,8 @@ test('real browser transport → mocked cloud → saved text, reload persistence
     'Here is a real pipeline test.',
   );
   await page.getByRole('button', { name: 'Connect Glyph' }).click(); // Reload erased the key/config.
-  await page.getByRole('button', { name: 'Enter an existing Glyph IP' }).click();
+  await page.getByLabel('Glyph address').fill('192.168.4.2');
+  await page.getByRole('button', { name: 'Next: speech recognition' }).click();
   await page.getByRole('button', { name: 'Cloud provider', exact: true }).click();
   await expect(page.getByLabel('API key (optional, this tab only)')).toHaveValue('');
 });

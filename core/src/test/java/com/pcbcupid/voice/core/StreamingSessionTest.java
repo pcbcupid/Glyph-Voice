@@ -87,23 +87,46 @@ public class StreamingSessionTest {
             assertEquals(1, shown.size());
         }
     }
-    @Test public void threeMinutesOfSamplesRemainLiveUntilExplicitEnd() throws Exception {
+    @Test public void thirtyMinutesOfSamplesRemainLiveUntilExplicitEnd() throws Exception {
         Fake model = new Fake();
         try (StreamingTranscriptionSession session = session(model)) {
             session.onStart("long", AudioFormat.standard());
             // Feed faster than wall time, but wait for each consumption to avoid
             // triggering the independent backlog safeguard.
-            for (int i = 0; i < 360; i++) {
+            for (int i = 0; i < 3600; i++) {
                 session.onAudio(new byte[16000]);
                 assertTrue(model.consumed.tryAcquire(3, TimeUnit.SECONDS));
             }
-            assertEquals(180, session.snapshot().duration, 0.001);
-            assertEquals(5_760_000L, session.snapshot().bytes);
+            assertEquals(1800, session.snapshot().duration, 0.001);
+            assertEquals(57_600_000L, session.snapshot().bytes);
             assertEquals(VoiceState.Phase.RECEIVING, session.snapshot().phase);
             assertEquals(0, model.finishes.get());
             session.onEnd("long");
             await(() -> !session.isBusy());
             assertTrue(session.snapshot().complete);
+        }
+    }
+    @Test public void audioPauseKeepsPartialWordsAndResumesWithoutAnAutomaticCompletion() throws Exception {
+        Fake model = new Fake();
+        try (StreamingTranscriptionSession session = session(model)) {
+            session.onStart("r1", AudioFormat.standard());
+            session.onAudio(new byte[3200]);
+            await(() -> !session.snapshot().text.isEmpty());
+            session.onWaitingForAudio("Waiting for Glyph audio");
+            assertEquals("Waiting for Glyph audio", session.snapshot().message);
+            assertEquals("live words", session.snapshot().text);
+            assertEquals(VoiceState.Phase.RECEIVING, session.snapshot().phase);
+            assertTrue(session.isBusy());
+            assertFalse(session.snapshot().complete);
+            assertFalse(session.snapshot().interrupted);
+            assertEquals(0, model.finishes.get());
+            session.onAudio(new byte[3200]);
+            assertTrue(session.snapshot().message.startsWith("Listening live"));
+            session.onEnd("r1");
+            await(() -> !session.isBusy());
+            session.onWaitingForAudio("Stale warning");
+            assertNotEquals("Stale warning", session.snapshot().message);
+            assertEquals(1, model.finishes.get());
         }
     }
     @Test public void sessionCountersCrossSigned32BitBoundary() throws Exception {

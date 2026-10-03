@@ -6,6 +6,34 @@ on:
 permissions:
   contents: read
 jobs:
+  installer:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m unittest installation.test_setup tools.test_start_web -v
+      - name: Check Windows bootstrap syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null; $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/installation/bootstrap.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | Write-Error; exit 1 }
+      - name: Check Unix bootstrap syntax
+        if: runner.os != 'Windows'
+        run: bash -n installation/install.sh installation/bootstrap.sh installation/install-macos.command start-web.sh start.sh
+      - name: Install software using the Unix bootstrap (no model download)
+        if: runner.os != 'Windows'
+        run: bash installation/install.sh --skip-model
+      - name: Install software using the Windows bootstrap (no model download)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: installation\install.cmd --skip-model
   local-server:
     runs-on: ubuntu-latest
     steps:
@@ -14,7 +42,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r server/requirements.txt
-      - run: python -m unittest server.test_server -v
+      - run: python -m unittest server.test_server server.test_summary -v
+      - run: python -m unittest tools.test_start_web -v
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -47,5 +76,15 @@ jobs:
           /tmp/glyph-decimator-test
           c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/StopCommandTest.cpp -o /tmp/glyph-stop-test
           /tmp/glyph-stop-test
-          c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/ProvisioningFrameTest.cpp -o /tmp/glyph-provisioning-test
-          /tmp/glyph-provisioning-test
+          c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/BootSetupWindowTest.cpp -o /tmp/glyph-boot-window-test
+          /tmp/glyph-boot-window-test
+          c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/AudioQueueBudgetTest.cpp -o /tmp/glyph-queue-test
+          /tmp/glyph-queue-test
+          c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/SerialCommandsTest.cpp -o /tmp/glyph-serial-test
+          /tmp/glyph-serial-test
+          c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/WifiCredentialsTest.cpp -o /tmp/glyph-wifi-credentials-test
+          /tmp/glyph-wifi-credentials-test
+          c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/HotspotProfileTest.cpp -o /tmp/glyph-hotspot-test
+          /tmp/glyph-hotspot-test
+          c++ -std=c++17 -Wall -Wextra -Werror firmware/tests/StatusLedTest.cpp -o /tmp/glyph-led-test
+          /tmp/glyph-led-test

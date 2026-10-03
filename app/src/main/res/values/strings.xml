@@ -6,7 +6,6 @@
     <string name="transcript_label">TRANSCRIPTION</string>
     <string name="transcript_live_label">LIVE TRANSCRIPTION · PARTIAL</string>
     <string name="transcript_placeholder">Ready when you are.\nYour words appear here.</string>
-    <string name="choose_glyph">Choose Glyph</string>
     <string name="speech_settings">Speech recognition · Local / Cloud</string>
     <string name="connect_glyph">Connect Glyph</string>
     <string name="disconnect">Disconnect</string>

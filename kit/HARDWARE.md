@@ -37,7 +37,7 @@ left channel of a Philips I2S stream: signed 24-bit samples in 32-bit stereo slo
 A stateful 97-tap low-pass filter and 3:1 decimation produce **16 kHz mono PCM16**.
 The configured digital gain is 2×, with saturation instead of wraparound.
 
-After BOOT is clicked, the capture task packages 20 ms of sound per WebSocket
+After BOOT is clicked, the capture task packages 40 ms of sound per WebSocket
 message. A bounded queue separates microphone sampling from Wi-Fi transmission.
 The phone recognizes speech and keeps text in its private history. BOOT clicked
 again, or the app's stop command, flushes the final short packet and ends the

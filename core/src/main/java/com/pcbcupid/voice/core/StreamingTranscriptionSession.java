@@ -31,6 +31,7 @@ public final class StreamingTranscriptionSession implements AudioReceiver.Listen
         final AudioFormat format;
         final ArrayBlockingQueue<byte[]> queue = new ArrayBlockingQueue<>(4096);
         volatile boolean cancelled, finished, overloaded;
+        boolean waiting;
         Thread thread;
         StreamingSpeechRecognizer.Stream stream;
         int queuedBytes;
@@ -57,6 +58,14 @@ public final class StreamingTranscriptionSession implements AudioReceiver.Listen
                 recordingSequence, complete, interrupted);
     }
     private void emit() { if (!closed) observer.accept(snapshot()); }
+
+    @Override public synchronized void onWaitingForAudio(String warning) {
+        if (!closed && active != null && !active.finished && !active.cancelled) {
+            active.waiting = true;
+            message = warning;
+            emit();
+        }
+    }
 
     @Override public synchronized void onConnection(AudioReceiver.Connection value) {
         if (closed) return;
@@ -113,7 +122,8 @@ public final class StreamingTranscriptionSession implements AudioReceiver.Listen
         job.queuedBytes += copy.length;
         bytes += copy.length;
         packets++;
-        if (packets == 1 || packets % 25 == 0) {
+        if (job.waiting || packets == 1 || packets % 25 == 0) {
+            job.waiting = false;
             message = bufferedSeconds() >= 4
                     ? "Catching up · " + (int) bufferedSeconds() + " seconds buffered. You can click BOOT to stop and finish."
                     : "Listening live… Click BOOT again to stop.";

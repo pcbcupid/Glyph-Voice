@@ -1,62 +1,68 @@
 # Connection and troubleshooting
 
-Source-built **0.12.0 / transport-r7** adds **Connect Glyph → Bluetooth setup**,
-which discovers the board and sends Wi-Fi details with a private pairing PIN.
-See [Bluetooth setup](../docs/BLUETOOTH_SETUP.md). The hotspot UDP flow below remains
-available through **Find via Wi-Fi**; Bluetooth also works for address discovery
-on a shared router, provided the router permits client-to-client traffic.
+Current **transport-r11** source uses Wi-Fi and manual IP only. Bluetooth setup,
+radar screens and UDP discovery are removed from firmware, Android and web.
 
-## Automatic hotspot discovery
+## Connect in three steps
 
-The Glyph joins the hotspot saved through its first-use setup page. Once connected,
-it sends a small UDP announcement every second to the DHCP gateway — the phone
-hosting that hotspot — on port **40123**. The app reads the sender's private IPv4
-address, validates the service/version/board ID, then connects to its WebSocket on
-port **8080**, path `/audio`. No subnet scan, Android hotspot-client-list access,
-location permission, or manually entered board IP is required.
+1. Put the Glyph and your phone/computer on the same trusted local network. The
+   Glyph can join your phone's 2.4 GHz hotspot or a shared 2.4 GHz router.
+2. Open the board's USB Serial Monitor at **115200 baud**. Copy its `[ready]`
+   recording address, for example `192.168.0.126:8080`. Check the board's GLYPH
+   suffix so you do not select another workshop participant's device.
+3. In Android or web, tap **Connect Glyph**, enter that address and connect.
+   Prepare the local model if prompted. Wait for **Connected**, then click BOOT
+   to start; click again or use **Stop & summarize** to finish.
 
-The first search gathers boards for three seconds. One board connects automatically;
-several boards show a **Choose Glyph** action. The chosen stable board ID is saved.
-Announcements update its address after DHCP changes. The existing transport also
-retries dropped connections. Interrupted audio is not resumed as a successful recording.
-To select a different board, disconnect, then use **Choose another board** in the
-Connect dialog. If the saved board is absent but another is found, Choose Glyph
-is offered directly.
+Both apps remember the last entered IP, not a discoverable device identity. DHCP
+can change the address after restarting the hotspot/router: copy the latest serial
+address if reconnecting fails. Port defaults to 8080; `/audio` is added by the app.
+There is one audio client per board. Disconnect Android before using web, and close
+other connections to the same Glyph. No Bluetooth or location permission is needed.
 
-This discovery flow is designed for the **phone hosting the hotspot**. Connecting
-both devices to an unrelated router sends board announcements to that router;
-it is not a supported automatic-discovery topology. Announcements and audio sockets
-are local and unauthenticated: use your own trusted, password-protected hotspot.
+## Configure Wi-Fi
 
-## If the board is not found
+Reset with BOOT released and tap BOOT during the **three-second countdown**. A
+board with no saved network opens setup automatically. In a write-capable serial
+monitor at 115200 with local echo off, answer the board-label and hotspot-password
+prompts (including confirmation). Join its printed **GLYPH-name-suffix** network
+using **your chosen password**, then open **http://192.168.4.1/**.
+Save the target network's credentials. Only a successful join replaces saved Wi-Fi;
+the board then restarts. Return your computer/phone to that network and read the
+new recording IP. Leave BOOT released on this restart to use saved settings.
+Only supported 2.4 GHz personal/open networks are accepted, not enterprise or
+web-login Wi-Fi. WPA2 Personal is recommended; passwordless APs require selecting
+**Open network** on the form.
 
-- Use matching app **0.11.0+** and firmware **transport-r6+**. Older firmware does not announce.
-- Check power, exact hotspot name/password, and 2.4 GHz / WPA2 compatibility mode.
-- Enable the hotspot on the same phone running GLYPH VOICE.
-- Finish first-use setup; the board must leave `GLYPH-Setup-xxxxxx` and join the hotspot.
-- Disable hotspot automatic shutoff and check client limits.
-- Temporarily disable VPN routing that prevents access to local devices.
-- Allow local-network access if your Android version asks. OEM firewall/tethering
-  behavior still needs device-specific testing; reconnect after changing settings.
-- Turn off the hotspot and hold BOOT for five seconds after normal startup to
-  reconfigure incorrect credentials.
+Missed the boot logs? Open the USB monitor and send **STATUS** + Enter for the
+current address/instructions. **HELP** lists commands; **WIFI SETUP** opens the
+hotspot once all apps are disconnected. A browser monitor/flasher can replace
+Arduino IDE: see [browser setup](FIRMWARE.md#browser-only-flash-and-serial-monitor-no-arduino-ide).
 
-USB serial at 115200 baud can show diagnostic connection information, but is not
-needed for normal setup or discovering the board's IP.
+GPIO14 blinks without a Wi-Fi IP, then stays on once connected. This is Wi-Fi
+status, not app/model readiness. The setup IP is not the normal recording IP.
+Setup uses HTTP and your chosen private AP password; use a trusted environment.
+The recording socket is unauthenticated
+LAN traffic, so an IP address is not a security boundary.
 
-## Connected but no words
+## If audio stops
 
-Wait until the local model or cloud recognizer is ready, then start with BOOT.
-Check microphone pin labels and signal format against [Hardware](HARDWARE.md).
-Local English recognition needs enough free RAM and storage. Cloud mode needs a
-compatible transcription URL, model, credentials and working internet on the phone.
-Very short speech may only produce a final result after stopping.
+- `queue full` / `socket write failed`: the link or receiver is not draining audio
+  fast enough. Bring board and receiver closer to the hotspot/router, avoid guest
+  isolation, check signal/queue logs and use one client. More buffering cannot fix
+  an indefinitely slower link. No samples are silently dropped to claim success.
+  If Android works but web fails, compare the browser/computer receiver path:
+  restart the updated Python server, keep the tab visible and the host awake,
+  and capture the `[network] Slow send` lines. High board RSSI alone does not
+  exclude receiver scheduling, TCP retransmissions or congestion. A `4104 ms`
+  stalled send exceeds the old 64-slot queue; r10 provides 128 slots (about five
+  seconds) but cannot guarantee recovery from longer or repeated stalls.
+- Fresh BOOT countdown: the board restarted; inspect reset/power logs separately.
+- `[stream] still sending` totals increase but text stops: inspect model/server
+  progress and app errors. Silence still produces PCM; it must not end capture.
+- Android uses its foreground service and background permissions. Web requires a
+  visible page and awake computer/phone; locking/hiding the page interrupts it.
 
-## Screen off or network interruption
-
-Keep the foreground notification active and follow the app's battery prompts.
-Disable hotspot auto-off, Battery Saver and Low Power Standby while recording if
-those settings interrupt tethering. Some phones require unrestricted background
-activity or auto-start. Force-stop stops the app. Saved text remains in history.
-
-For a real board/phone verification sequence, use [Testing](../docs/TESTING.md).
+For workshops and the one-command web launcher, see [Workshop](../docs/WORKSHOP.md).
+Local STT requires no internet once its model is installed. Cloud summaries require
+internet and an explicitly configured API key. No phone microphone is used.

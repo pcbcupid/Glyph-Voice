@@ -5,6 +5,19 @@ import time
 import uuid
 
 
+def warm_up(engine, np):
+    """Pay native first-decode costs before advertising model readiness.
+
+    Use a disposable stream: no warm-up samples/state may enter a user's recording.
+    Finishing the stream also exercises encoders with larger right-context windows.
+    """
+    stream = engine.create_stream()
+    stream.accept_waveform(16000, np.zeros(32000, dtype=np.float32))
+    stream.input_finished()
+    while engine.is_ready(stream):
+        engine.decode_stream(stream)
+
+
 def worker(pipe, files, threads):
     try:
         # Native crashes must not leave a core dump containing in-memory speech.
@@ -20,6 +33,7 @@ def worker(pipe, files, threads):
             decoding_method="greedy_search", enable_endpoint_detection=False,
             provider="cpu", debug=False,
         )
+        warm_up(engine, np)
         pipe.send({"ok": True})
         stream = None
         rate = 16000
@@ -94,7 +108,11 @@ class Inference:
         try:
             while time.monotonic() < until:
                 if self.pipe.poll():
-                    result = self.pipe.recv()
+                    # poll() only guarantees readable bytes, not a whole pickle.
+                    # recv() can still block while the worker writes its result;
+                    # never make the HTTP / Glyph bridge event loop wait for it.
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(self.pipe.recv), max(.001, until - time.monotonic()))
                     if not result.get("ok"):
                         raise RuntimeError("Local inference failed. Check the model folder and reload it.")
                     return result
@@ -102,6 +120,9 @@ class Inference:
                     raise RuntimeError("Local model worker exited. Check model compatibility and available RAM.")
                 await asyncio.sleep(.01)
             raise RuntimeError("Local inference timed out. Use a faster host, fewer competing tasks, or a smaller supported model.")
+        except TimeoutError as error:
+            self.stop()
+            raise RuntimeError("Local inference timed out. Reload the model or use a faster host.") from error
         except (EOFError, OSError) as error:
             self.stop()
             raise RuntimeError("Local inference worker disconnected. Reload the model.") from error
@@ -112,12 +133,23 @@ class Inference:
     async def _command(self, op, value=None):
         if not self.pipe:
             raise RuntimeError("Load a local model first.")
+        until = time.monotonic() + 30
         try:
-            self.pipe.send((op, value))
+            # Pipe capacity is finite. Even with native inference in another
+            # process, a blocking send here used to stall every network handler.
+            # Keep the same total command deadline, not 30 seconds per phase.
+            await asyncio.wait_for(asyncio.to_thread(self.pipe.send, (op, value)), 30)
+        except TimeoutError as error:
+            self.stop()
+            raise RuntimeError("Local inference timed out while accepting audio. Reload the model or use a faster host.") from error
         except (OSError, EOFError) as error:
             self.stop()
             raise RuntimeError("Local worker disconnected. Reload the model.") from error
-        result = await self._reply()
+        except BaseException:
+            # A cancelled writer must not remain alive against a reused pipe.
+            self.stop()
+            raise
+        result = await self._reply(max(0, until - time.monotonic()))
         self.touched = time.monotonic()
         return result
 
